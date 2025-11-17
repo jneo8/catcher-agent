@@ -13,3 +13,4 @@ wheels/
 .dev-scripts
 *.tar
 *.rock
+.env

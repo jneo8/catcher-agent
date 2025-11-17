@@ -84,3 +84,21 @@ juju debug-log --include catcher-agent-worker --tail
 # Scale to multiple workers (optional)
 juju scale-application catcher-agent-worker 3
 ```
+
+# Add Gemini API key to worker
+
+```bash
+juju add-secret gemini-api-key gemini-api-key={your-api-key}
+
+# Output: secret:<secret_id1>
+
+juju grant-secret gemini-api-key catcher-agent-worker
+juju config catcher-agent-worker environment=@./environment.yaml
+```
+
+`environment.yaml`
+
+```yaml
+juju:
+  secret-id: <secret_id1>
+```

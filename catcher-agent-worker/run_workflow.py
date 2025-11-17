@@ -14,7 +14,7 @@ async def main():
 
     await client.execute_workflow(
         workflow_name,
-        "test helloworld",
+        "Please tell me a joke",
         id=workflow_id,
         task_queue="catcher-agent-queue",
     )

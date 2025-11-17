@@ -2,23 +2,37 @@
 
 import asyncio
 import os
+from datetime import timedelta
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from agents.extensions.models.litellm_provider import LitellmProvider
 from catcher_agent_worker.workflows.helloworld import HelloWorkflow
+from temporalio.contrib.openai_agents import OpenAIAgentsPlugin, ModelActivityParameters
 
 
 async def main():
     """Start the Temporal worker."""
     # Get config from environment (injected by temporal-worker-k8s-operator)
     host = os.getenv("TEMPORAL_HOST", "localhost:7233")
-    namespace = os.getenv("TWC_NAMESPACE", "default")
+    namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
     queue = os.getenv("TEMPORAL_QUEUE", "catcher-agent-queue")
 
-    print(f"Connecting to Temporal: host={host}, namespace={namespace}, queue={queue}")
+    API_KEY = os.getenv("GEMINI_API_KEY")
 
     # Create Temporal client
-    client = await Client.connect(host, namespace=namespace)
+    client = await Client.connect(
+        host,
+        namespace=namespace,
+        plugins=[
+            OpenAIAgentsPlugin(
+                model_params=ModelActivityParameters(
+                    start_to_close_timeout=timedelta(seconds=60),
+                ),
+                model_provider=LitellmProvider(),
+            )
+        ],
+    )
 
     # Create worker
     worker = Worker(

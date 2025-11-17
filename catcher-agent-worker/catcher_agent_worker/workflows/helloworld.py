@@ -1,6 +1,7 @@
 """Simple Hello World workflow for testing."""
 
 from temporalio import workflow
+from agents import Agent, Runner
 
 
 @workflow.defn
@@ -8,7 +9,7 @@ class HelloWorkflow:
     """A simple workflow that returns a greeting."""
 
     @workflow.run
-    async def run(self, name: str) -> str:
+    async def run(self, prompt: str) -> str:
         """
         Run the workflow.
 
@@ -18,7 +19,11 @@ class HelloWorkflow:
         Returns:
             A greeting message
         """
-        workflow.logger.info(f"HelloWorkflow started with name: {name}")
-        message = f"Hello, {name}! Welcome to Temporal."
-        workflow.logger.info(f"HelloWorkflow completed")
-        return message
+        agent = Agent(
+            name="Assistant",
+            instructions="",
+            model="gemini/gemini-2.0-flash-lite",
+        )
+        result = await Runner.run(agent, input=prompt)
+        workflow.logger.info("HelloWorkflow completed")
+        return result.final_output
