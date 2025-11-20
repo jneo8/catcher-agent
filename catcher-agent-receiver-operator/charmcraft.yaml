@@ -1,0 +1,26 @@
+# This file configures Charmcraft.
+# See https://juju.is/docs/sdk/charmcraft-config for guidance.
+
+name: catcher-agent-receiver-operator
+
+type: charm
+
+base: ubuntu@24.04
+
+# the platforms this charm should be built on and run on.
+# you can check your architecture with `dpkg --print-architecture`
+platforms:
+  amd64:
+  # arm64:
+  # ppc64el:
+  # s390x:
+
+# (Required)
+summary: A very short one-line summary of the FastAPI application.
+
+# (Required)
+description: |
+  A webhook to receive the alert notification and trigger the catcher agent workflow
+
+extensions:
+  - fastapi-framework
