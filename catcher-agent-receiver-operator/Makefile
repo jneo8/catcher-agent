@@ -47,6 +47,10 @@ deploy:  ## Deploy charm with pre-uploaded image
 update-image: rock-load  ## Update running charm with new local image
 	./.dev-scripts/update-image.sh
 
+.PHONY: port-forward
+port-forward:  ## Run kubectl port-forward to access receiver service
+	kubectl port-forward -n temporal svc/$(ROCK_NAME) 8080:8080
+
 ##@ Help
 
 .PHONY: help
