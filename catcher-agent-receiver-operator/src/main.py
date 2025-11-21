@@ -1,15 +1,33 @@
 """Main application with webhook endpoint for Alertmanager notifications."""
 
-import logging
+import sys
+from contextlib import asynccontextmanager
 from typing import Any, Dict
 
 from fastapi import FastAPI, HTTPException
+from loguru import logger
 
 from models import AlertmanagerWebhook
 
-logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Catcher Agent Receiver", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Configure application lifespan events."""
+    # Startup: Configure logging
+    logger.remove()  # Remove default handler
+    logger.add(
+        sys.stdout,
+        format="{time:YYYY-MM-DDTHH:mm:ss.SSS}Z [{extra[service]}] {level}: {message}",
+        level="INFO",
+    )
+    logger.configure(extra={"service": "catcher-agent"})
+    logger.info("Application startup")
+    yield
+    # Shutdown
+    logger.info("Application shutdown")
+
+
+app = FastAPI(title="Catcher Agent Receiver", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/")
