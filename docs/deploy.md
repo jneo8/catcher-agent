@@ -23,7 +23,7 @@ or follow below instruction:
 juju add-model temporal
 
 # Deploy Temporal server
-juju deploy temporal-k8s --channel 1.23/edge
+juju deploy temporal-k8s --channel 1.23/edge --config num-history-shards=4
 
 # Wait for deployment to complete
 juju wait-for application temporal-k8s --query='status=="active"'
@@ -80,12 +80,11 @@ Deploy the worker:
 
 ```bash
 # Deploy worker
-juju deploy temporal-worker-k8s catcher-agent-worker --channel stable \
-    --resource temporal-worker-image=ghcr.io/jneo8/catcher-agent-worker:0.1.0 \
-    --config host="temporal-k8s.temporal.svc.cluster.local:7233" \
-    --config namespace=default \
-    --config queue=catcher-agent-queue \
-    --config log-level=info
+juju deploy temporal-worker-k8s catcher-agent-worker --channel stable --resource temporal-worker-image=ghcr.io/jneo8/catcher-agent-worker:0.1.0 --config host="temporal-k8s.temporal.svc.cluster.local:7233" --config namespace=default --config queue=catcher-agent-queue --config log-level=info
+```
+
+```sh
+juju run temporal-admin-k8s/0 cli args="operator namespace create --namespace default --retention 3d" --wait 1m
 ```
 
 ### Add Gemini API key to worker
