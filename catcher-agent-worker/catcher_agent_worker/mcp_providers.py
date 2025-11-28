@@ -4,17 +4,20 @@ This module provides a configuration-driven approach for registering MCP servers
 MCP servers are configured entirely via environment variables - no code changes needed.
 
 Configuration Format:
-    MCP_SERVERS: Comma-separated list of server names (e.g., "kubernetes,openstack")
+    MCP_SERVERS: Comma-separated list of server names (e.g., "kubernetes,grafana")
     MCP_{SERVER}_URL: HTTP/HTTPS URL for the server (required)
     MCP_{SERVER}_ENABLED: Enable/disable the server (default: true)
+    MCP_{SERVER}_TRANSPORT: Transport type - 'http' or 'sse' (default: http)
     MCP_{SERVER}_ALLOWED_TOOLS: Comma-separated list of allowed tools (optional)
 
 Example:
-    export MCP_SERVERS="kubernetes,openstack"
-    export MCP_KUBERNETES_URL="http://kubernetes-mcp:8000"
+    export MCP_SERVERS="kubernetes,grafana"
+    export MCP_KUBERNETES_URL="http://kubernetes-mcp:8000/mcp"
     export MCP_KUBERNETES_ENABLED="true"
+    export MCP_KUBERNETES_TRANSPORT="http"
     export MCP_KUBERNETES_ALLOWED_TOOLS="get_pods,create_deployment"
-    export MCP_OPENSTACK_URL="https://openstack-mcp:8443"
+    export MCP_GRAFANA_URL="http://grafana-mcp:8000/sse"
+    export MCP_GRAFANA_TRANSPORT="sse"
 """
 
 import logging
@@ -22,7 +25,7 @@ import os
 from dataclasses import dataclass
 from typing import List, Optional
 
-from agents.mcp import MCPServerStreamableHttp, create_static_tool_filter
+from agents.mcp import MCPServerStreamableHttp, MCPServerSse, create_static_tool_filter
 from temporalio.contrib.openai_agents import StatelessMCPServerProvider
 
 logger = logging.getLogger(__name__)
@@ -37,12 +40,14 @@ class MCPServerConfig:
         url: HTTP/HTTPS endpoint URL
         enabled: Whether the server is enabled
         allowed_tools: Optional list of allowed tool names
+        transport: Transport type to use ('http' or 'sse')
     """
 
     name: str
     url: str
     enabled: bool = True
     allowed_tools: Optional[List[str]] = None
+    transport: str = "http"
 
 
 class MCPConfig:
@@ -98,6 +103,15 @@ class MCPConfig:
             logger.error("MCP server '%s' has invalid URL '%s' (must start with http:// or https://)", server_name, url)
             return None
 
+        # Get transport type (default: http)
+        transport_key = f"MCP_{server_key}_TRANSPORT"
+        transport = os.getenv(transport_key, "http").lower()
+
+        # Validate transport type
+        if transport not in ("http", "sse"):
+            logger.error("MCP server '%s' has invalid transport '%s' (must be 'http' or 'sse')", server_name, transport)
+            return None
+
         # Get optional tool filtering
         allowed_tools_key = f"MCP_{server_key}_ALLOWED_TOOLS"
         allowed_tools_str = os.getenv(allowed_tools_key)
@@ -111,6 +125,7 @@ class MCPConfig:
             url=url,
             enabled=enabled,
             allowed_tools=allowed_tools,
+            transport=transport,
         )
 
     @property
@@ -189,18 +204,26 @@ class MCPProviderRegistry:
         def create_mcp_server(
             name: str = server_config.name,
             server_url: str = server_config.url,
+            transport: str = server_config.transport,
             filter_tools=tool_filter
         ):
-            return MCPServerStreamableHttp(
-                params={"url": server_url},
-                name=name,
-                tool_filter=filter_tools,
-            )
+            if transport == "sse":
+                return MCPServerSse(
+                    params={"url": server_url},
+                    name=name,
+                    tool_filter=filter_tools,
+                )
+            else:  # default to http
+                return MCPServerStreamableHttp(
+                    params={"url": server_url},
+                    name=name,
+                    tool_filter=filter_tools,
+                )
 
         provider = StatelessMCPServerProvider(
             server_config.name,
             create_mcp_server,
         )
 
-        logger.info("Created MCP provider '%s' at %s", server_config.name, server_config.url)
+        logger.info("Created MCP provider '%s' at %s (transport=%s)", server_config.name, server_config.url, server_config.transport)
         return provider

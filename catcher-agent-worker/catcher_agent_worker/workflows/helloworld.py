@@ -51,7 +51,7 @@ Use the available tools when the user's request involves infrastructure manageme
         agent = Agent(
             name="Assistant",
             instructions=instructions,
-            model="gemini/gemini-2.0-flash-lite",
+            model="gemini/gemini-2.5-pro",
             mcp_servers=mcp_servers,
         )
 
