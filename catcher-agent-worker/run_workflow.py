@@ -12,11 +12,14 @@ async def main():
     workflow_name = "HelloWorkflow"
     workflow_id = "helloworld-id"
 
+    enabled_server_names = ["kubernetes"]
+
     await client.execute_workflow(
         workflow_name,
-        "Please tell me a joke",
+        "Please trouble shooting for me the failure pod in all the namespace. Please include the failure pod information & why it's failed",
         id=workflow_id,
         task_queue="catcher-agent-queue",
+        memo={"mcp_servers": enabled_server_names},
     )
 
 

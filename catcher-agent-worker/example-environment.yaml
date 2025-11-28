@@ -1,0 +1,14 @@
+env:
+  # MCP Server Configuration
+  - name: MCP_SERVERS
+    value: kubernetes
+  - name: MCP_KUBERNETES_URL
+    value: http://kubernetes-mcp-server.kubernetes-mcp-server.svc.cluster.local:8080/mcp
+  - name: MCP_KUBERNETES_ENABLED
+    value: "true"
+  # Optional: Restrict to specific tools (uncomment to enable)
+  # - name: MCP_KUBERNETES_ALLOWED_TOOLS
+  #   value: "get_pods,get_deployments,create_deployment"
+
+juju:
+  - secret-id: d4ju00vmp25c74v5u4o0

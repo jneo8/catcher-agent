@@ -1,14 +1,19 @@
 """Temporal worker for Catcher Agent."""
 
 import asyncio
+import logging
 import os
 from datetime import timedelta
 from temporalio.client import Client
 from temporalio.worker import Worker
 
 from agents.extensions.models.litellm_provider import LitellmProvider
+from catcher_agent_worker.mcp_providers import MCPConfig, MCPProviderRegistry
 from catcher_agent_worker.workflows.helloworld import HelloWorkflow
 from temporalio.contrib.openai_agents import OpenAIAgentsPlugin, ModelActivityParameters
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 async def main():
@@ -18,7 +23,11 @@ async def main():
     namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
     queue = os.getenv("TEMPORAL_QUEUE", "catcher-agent-queue")
 
-    API_KEY = os.getenv("GEMINI_API_KEY")
+    # Load MCP configuration from environment
+    mcp_config = MCPConfig()
+
+    # Get all registered MCP server providers
+    mcp_providers = MCPProviderRegistry.get_all_providers(mcp_config)
 
     # Create Temporal client
     client = await Client.connect(
@@ -29,7 +38,9 @@ async def main():
                 model_params=ModelActivityParameters(
                     start_to_close_timeout=timedelta(seconds=60),
                 ),
+                # The Gemini needs to define GEMINI_API_KEY environment variable
                 model_provider=LitellmProvider(),
+                mcp_server_providers=mcp_providers,
             )
         ],
     )
@@ -41,7 +52,7 @@ async def main():
         workflows=[HelloWorkflow],
     )
 
-    print(f"Worker started successfully on queue: {queue}")
+    logger.info("Worker started successfully on queue: %s", queue)
     await worker.run()
 
 
