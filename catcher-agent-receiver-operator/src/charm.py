@@ -9,12 +9,13 @@ import typing
 
 import ops
 import paas_charm.fastapi
+from paas_charm.fastapi.charm import FastAPIConfig
 from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
 
-class Config(paas_charm.fastapi.FastAPIConfig):
+class Config(FastAPIConfig):
     """Extended FastAPI configuration with catcher-agent specific options.
 
     Attrs:
