@@ -1,7 +1,7 @@
 # This file configures Charmcraft.
 # See https://juju.is/docs/sdk/charmcraft-config for guidance.
 
-name: catcher-agent-receiver-operator
+name: catcher-agent-receiver
 
 type: charm
 
@@ -16,11 +16,43 @@ platforms:
   # s390x:
 
 # (Required)
-summary: A very short one-line summary of the FastAPI application.
+summary: Webhook receiver for Catcher Agent alert processing
 
 # (Required)
 description: |
-  A webhook to receive the alert notification and trigger the catcher agent workflow
+  A webhook receiver that accepts Prometheus Alertmanager notifications and
+  triggers AI-driven root cause analysis workflows via Temporal. Maps alerts
+  to customizable investigation prompts with MCP tool integration.
+
+config:
+  options:
+    alert-prompts-file:
+      type: string
+      default: "/etc/catcher-agent/alert-prompts.yaml"
+      description: |
+        Path to the YAML file containing alert-to-prompt mappings.
+        This file defines which AI prompts and MCP servers to use for each alert type.
+        The file should be mounted into the container at this path (e.g., via ConfigMap).
+
+    temporal-host:
+      type: string
+      default: "localhost:7233"
+      description: |
+        Temporal server host and port (e.g., "temporal.default.svc.cluster.local:7233").
+        This is where the receiver will connect to trigger workflows.
+
+    temporal-namespace:
+      type: string
+      default: "default"
+      description: |
+        Temporal namespace to use for workflow execution.
+
+    temporal-queue:
+      type: string
+      default: "catcher-agent-queue"
+      description: |
+        Temporal task queue name where workflows will be submitted.
+        This should match the queue name that the catcher-agent-worker is listening on.
 
 extensions:
   - fastapi-framework
