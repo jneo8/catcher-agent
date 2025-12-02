@@ -5,6 +5,7 @@ import logging
 import os
 from datetime import timedelta
 from temporalio.client import Client
+from temporalio.common import RetryPolicy
 from temporalio.worker import Worker
 
 from agents.extensions.models.litellm_provider import LitellmProvider
@@ -37,6 +38,12 @@ async def main():
             OpenAIAgentsPlugin(
                 model_params=ModelActivityParameters(
                     start_to_close_timeout=timedelta(seconds=60),
+                    # Disable automatic retries - let the AI agent handle failures
+                    # This allows the agent to see tool errors and decide whether to
+                    # fix parameters or try a different approach
+                    retry_policy=RetryPolicy(
+                        maximum_attempts=1,  # Only try once, no automatic retries
+                    ),
                 ),
                 # The Gemini needs to define GEMINI_API_KEY environment variable
                 model_provider=LitellmProvider(),
