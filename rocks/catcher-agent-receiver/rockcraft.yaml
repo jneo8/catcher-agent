@@ -1,0 +1,14 @@
+name: catcher-agent-receiver
+base: ubuntu@24.04
+version: '0.1'
+summary: Webhook receiver for Catcher Agent alert processing
+description: |
+    A webhook receiver that accepts Prometheus Alertmanager notifications and
+    triggers AI-driven root cause analysis workflows via Temporal. Maps alerts
+    to customizable investigation prompts with MCP tool integration.
+
+platforms:
+    amd64:
+
+extensions:
+- fastapi-framework

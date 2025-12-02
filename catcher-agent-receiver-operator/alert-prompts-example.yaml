@@ -1,0 +1,85 @@
+# Alert Prompt Configuration
+# This file maps Prometheus alert names to AI agent prompts and MCP server configurations
+#
+# Schema:
+#   alert_prompts:
+#     <AlertName>:
+#       mcp_servers: [list of MCP server names]
+#       prompt: |
+#         Multi-line prompt template with Jinja2 variables
+#
+# Available template variables:
+#   - alertname: Name of the firing alert
+#   - status: Alert status (firing/resolved)
+#   - labels.*: Any label from the alert (e.g., labels.namespace, labels.pod)
+#   - annotations.*: Any annotation from the alert
+#   - starts_at: Alert start time
+#   - ends_at: Alert end time (if resolved)
+#   - fingerprint: Unique alert fingerprint
+#   - generator_url: URL to the alert source
+
+alert_prompts:
+  # KubePodNotReady Alert - Pods stuck in non-ready state
+  KubePodNotReady1M:
+    mcp_servers:
+      - kubernetes
+      - grafana
+    prompt: |
+      ALERT: {{ alertname }}
+      Pod: {{ labels.pod }}
+      Namespace: {{ labels.namespace }}
+      Cluster: {{ labels.cluster | default('unknown') }}
+      Status: {{ status }}
+      Duration: Pod has been in non-ready state for 1+ minutes
+      Started At: {{ starts_at }}
+
+      Your task is to perform root cause analysis for this alert using the available MCP tools.
+
+      Follow this investigation workflow:
+
+      PHASE 1: Initial Assessment
+      1. Get the pod details and identify its current phase (Pending/Unknown/Failed)
+      2. Check pod events for any obvious error messages
+      3. Identify if the pod is part of a Deployment, StatefulSet, or DaemonSet
+
+      PHASE 2: Root Cause Investigation
+
+      Based on the pod phase, investigate ONE of these scenarios:
+
+      SCENARIO A: If pod is in "Pending" phase and NOT scheduled
+      - Check for FailedScheduling events
+      - Examine resource requests vs. node capacity
+      - Check node selectors, affinity rules, taints, and tolerations
+      - Query Prometheus for cluster resource utilization
+      - Look for related alerts: KubeCPUOvercommit, KubeMemoryOvercommit
+
+      SCENARIO B: If pod is in "Pending" phase and IS scheduled
+      - Check container statuses for ImagePullBackOff or ErrImagePull
+      - Verify image name and tag
+      - Check imagePullSecrets configuration
+      - Query containerd logs for image pull failures
+      - Look for authentication, network, or rate limiting errors
+
+      SCENARIO C: If pod is in "Failed" phase
+      - Check container exit code and termination reason
+      - Review container logs for error messages or stack traces
+      - Check if container was OOMKilled (out of memory)
+      - Examine pod events for BackOff, CrashLoopBackOff, or Error events
+      - Verify resource limits vs. actual usage
+      - Check for failed liveness/startup probes
+
+      IMPORTANT NOTES:
+      - This is Canonical Kubernetes - logs must be queried from Loki
+      - Available Canonical Kubernetes services: k8s.kubelet, k8s.containerd
+      - Use query format: {instance="<node-name>"} |= `snap.k8s.<service>.service`
+      - Consider time ranges - the incident may not be happening in real-time
+      - Perform READ-ONLY operations only
+      - Provide evidence for your conclusion with specific log entries or metric values
+
+      DELIVERABLE:
+      Provide a clear root cause analysis with:
+      1. Root cause category: Resource Shortage / Image Pull Failure / Container Failure
+      2. Specific root cause (e.g., "Insufficient CPU resources", "Invalid imagePullSecret", "Application crash")
+      3. Evidence from logs, events, or metrics
+      4. Recommended remediation action
+      5. Any related alerts that are also firing
