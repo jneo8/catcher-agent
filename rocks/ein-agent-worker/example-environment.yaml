@@ -1,0 +1,21 @@
+env:
+  # MCP Server Configuration
+  - name: MCP_SERVERS
+    value: kubernetes,grafana
+  - name: MCP_KUBERNETES_URL
+    value: http://kubernetes-mcp-server.kubernetes-mcp-server.svc.cluster.local:8080/mcp
+  - name: MCP_KUBERNETES_ENABLED
+    value: "true"
+  - name: MCP_KUBERNETES_TRANSPORT
+    value: http
+
+  # Grafana MCP Server Configuration
+  - name: MCP_GRAFANA_URL
+    value: http://my-release-grafana-mcp.mcp-grafana.svc.cluster.local:8000/sse
+  - name: MCP_GRAFANA_ENABLED
+    value: "true"
+  - name: MCP_GRAFANA_TRANSPORT
+    value: sse
+
+juju:
+  - secret-id: d4nsqv7mp25c77vcjq90

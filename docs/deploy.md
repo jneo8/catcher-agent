@@ -50,12 +50,12 @@ kubectl port-forward -n temporal pod/temporal-ui-k8s-0 8080:8080
 
 Once deployed, note the Temporal server address (typically the service IP or hostname). You'll need this when deploying the worker.
 
-## Deploy catcher-agent temporal worker
+## Deploy ein-agent temporal worker
 
 ### Build and Push ROCK Image
 
 ```bash
-cd ./catcher-agent-worker
+cd ./rocks/ein-agent-worker
 
 # Generate lock file
 uv lock
@@ -80,7 +80,7 @@ Deploy the worker:
 
 ```bash
 # Deploy worker
-juju deploy temporal-worker-k8s catcher-agent-worker --channel stable --resource temporal-worker-image=ghcr.io/jneo8/catcher-agent-worker:0.1.0 --config host="temporal-k8s.temporal.svc.cluster.local:7233" --config namespace=default --config queue=catcher-agent-queue --config log-level=info
+juju deploy temporal-worker-k8s ein-agent-worker --channel stable --resource temporal-worker-image=ghcr.io/jneo8/ein-agent-worker:0.1.0 --config host="temporal-k8s.temporal.svc.cluster.local:7233" --config namespace=default --config queue=ein-agent-queue --config log-level=info
 ```
 
 ```sh
@@ -94,8 +94,8 @@ juju add-secret gemini-api-key gemini-api-key={your-api-key}
 
 # Output: secret:<secret_id1>
 
-juju grant-secret gemini-api-key catcher-agent-worker
-juju config catcher-agent-worker environment=@./environment.yaml
+juju grant-secret gemini-api-key ein-agent-worker
+juju config ein-agent-worker environment=@./environment.yaml
 ```
 
 `environment.yaml`
@@ -105,14 +105,14 @@ juju:
   secret-id: <secret_id1>
 ```
 
-## Deploy Catcher-Agent-Receiver-Operator
+## Deploy Ein-Agent-API-Operator
 
-The catcher-agent-receiver-operator is a FastAPI-based webhook receiver that accepts Alertmanager notifications and triggers the catcher agent workflow. It runs as a Juju charm on Kubernetes.
+The ein-agent-api-operator is a FastAPI-based API service that accepts webhooks (including Alertmanager notifications) and triggers Ein agent workflows. It runs as a Juju charm on Kubernetes.
 
 ### Build and Push the ROCK Image
 
 ```bash
-cd ./catcher-agent-receiver-operator
+cd ./rocks/ein-agent-api
 
 # Generate requirements.txt from pyproject.toml
 uv lock
@@ -133,11 +133,13 @@ And make sure the image is import and available on the k8s registry.
 ### Build the Charm
 
 ```bash
+cd ../../ein-agent-api-operator
+
 # Build charm package
 make charm-build
 ```
 
-This will create a `catcher-agent-receiver-operator_amd64.charm` file.
+This will create a `ein-agent-api-operator_amd64.charm` file.
 
 ### Deploy the Charm
 
@@ -150,8 +152,15 @@ Deploy the charm with the app image as a resource:
 juju switch temporal
 
 # Deploy with specific image version
-juju deploy ./catcher-agent-receiver-operator_amd64.charm \
-    --resource app-image=ghcr.io/jneo8/catcher-agent-receiver-operator:0.1
+juju deploy ./ein-agent-api-operator_amd64.charm \
+    --resource app-image=ghcr.io/jneo8/ein-agent-api:0.1
+```
+
+### Config ein agent api operator
+
+```sh
+juju config ein-agent-api alert-prompts=@./alert-prompts-example.yaml
+juju config ein-agent-api temporal-host=temporal-k8s.temporal.svc.cluster.local:7233
 ```
 
 ### Access the Webhook Service
@@ -166,10 +175,10 @@ To access the service, you can use port-forwarding:
 
 ```bash
 # Get the pod name
-kubectl get pods -n <model-name> | grep catcher-agent-receiver
+kubectl get pods -n <model-name> | grep ein-agent-api
 
 # Port forward to local machine
-kubectl port-forward -n temporal svc/catcher-agent-receiver-operator 8080:8080
+kubectl port-forward -n temporal svc/ein-agent-api 8080:8080
 
 # Test the endpoints
 curl http://localhost:8080/
@@ -185,21 +194,21 @@ Configure Alertmanager to send notifications to the webhook endpoint:
 ```yaml
 # alertmanager.yml
 receivers:
-  - name: 'catcher-agent'
+  - name: 'ein-agent'
     webhook_configs:
-      - url: 'http://catcher-agent-receiver-operator.temporal.svc.cluster.local:8080/webhook/alertmanager'
+      - url: 'http://ein-agent-api.temporal.svc.cluster.local:8080/webhook/alertmanager'
         send_resolved: true
 
 route:
-  receiver: 'catcher-agent'
+  receiver: 'ein-agent'
   group_by: ['alertname']
   group_wait: 10s
   group_interval: 10s
   repeat_interval: 1h
 ```
 
-Then using below command to see the request received by the receiver:
+Then using below command to see the request received by the API:
 
 ```sh
-kubectl logs -f -n temporal catcher-agent-receiver-operator-0 -c app
+kubectl logs -f -n temporal ein-agent-api-0 -c app
 ```

@@ -1,0 +1,20 @@
+[project]
+name = "ein-agent-worker"
+version = "0.1.0"
+description = "Temporal worker for Ein Agent AI-powered workflow execution"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "litellm>=1.80.0",
+    "openai-agents>=0.5.1",
+    "temporalio>=1.19.0",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "temporal-lib-py>=1.8.4",
+]

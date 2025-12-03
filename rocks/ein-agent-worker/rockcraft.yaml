@@ -1,0 +1,34 @@
+name: ein-agent-worker
+base: ubuntu@24.04
+build-base: ubuntu@24.04
+version: '0.1.0'
+summary: Ein Agent Temporal Worker
+description: Temporal worker for temporal-worker-k8s-operator
+license: Apache-2.0
+
+services:
+  temporal-worker:
+    override: replace
+    summary: "ein agent worker"
+    startup: disabled
+    command: "/app/scripts/start-worker.sh"
+
+platforms:
+  amd64:
+
+parts:
+  worker-dependencies:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+    stage-packages:
+      - python3
+  worker-app:
+    plugin: dump
+    source: .
+    organize:
+      ein_agent_worker/*: app/ein_agent_worker/
+      scripts/*: app/scripts/
+    stage:
+      - app
