@@ -19,16 +19,16 @@ class Config(FastAPIConfig):
     """Extended FastAPI configuration with catcher-agent specific options.
 
     Attrs:
-        alert_prompts_file: Path to YAML file containing alert-to-prompt mappings
+        alert_prompts: YAML string containing alert-to-prompt mappings
         temporal_host: Temporal server host and port
         temporal_namespace: Temporal namespace for workflow execution
         temporal_queue: Temporal task queue name for workflow submission
     """
 
-    alert_prompts_file: str = Field(
-        alias="alert-prompts-file",
-        default="/etc/catcher-agent/alert-prompts.yaml",
-        description="Path to alert-prompts YAML configuration file",
+    alert_prompts: str = Field(
+        alias="alert-prompts",
+        default="",
+        description="YAML string content containing alert-to-prompt mappings",
     )
     temporal_host: str = Field(
         alias="temporal-host",

@@ -110,6 +110,43 @@ class AlertPromptRegistry:
         logger.info(f"Loaded {len(registry._registry)} alert prompt configurations")
         return registry
 
+    @classmethod
+    def from_yaml_string(cls, yaml_content: str) -> "AlertPromptRegistry":
+        """Load alert prompt configurations from YAML string.
+
+        Args:
+            yaml_content: YAML string content containing alert-to-prompt mappings
+
+        Returns:
+            AlertPromptRegistry instance with loaded configurations
+
+        Raises:
+            yaml.YAMLError: If YAML parsing fails
+            ValueError: If YAML structure is invalid
+        """
+        logger.info("Loading alert prompts from YAML string")
+
+        data = yaml.safe_load(yaml_content)
+
+        if not data or "alert_prompts" not in data:
+            raise ValueError("Invalid YAML structure: missing 'alert_prompts' key")
+
+        registry = cls()
+        alert_prompts = data["alert_prompts"]
+
+        for alert_name, config_dict in alert_prompts.items():
+            try:
+                # Add alert_name to the config dict before creating Pydantic model
+                config_dict["alert_name"] = alert_name
+                config = AlertPromptConfig(**config_dict)
+                registry._registry[alert_name] = config
+                logger.info(f"Registered alert: {alert_name} with MCP servers: {config.mcp_servers}")
+            except Exception as e:
+                logger.warning(f"Skipping alert '{alert_name}': {e}")
+
+        logger.info(f"Loaded {len(registry._registry)} alert prompt configurations")
+        return registry
+
     def get_config(self, alert_name: str) -> Optional[AlertPromptConfig]:
         """Get configuration for an alert.
 

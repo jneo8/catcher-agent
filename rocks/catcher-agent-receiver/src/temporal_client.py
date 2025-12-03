@@ -92,14 +92,14 @@ async def process_alert(
     """
     alert_name = alert.labels.get("alertname", "unknown")
 
-    logger.info(f"Processing alert: {alert_name}")
-    logger.info(f"  Status: {alert.status}")
-    logger.info(f"  Labels: {alert.labels}")
-    logger.info(f"  Starts At: {alert.starts_at}")
+    logger.debug(f"Processing alert: {alert_name}")
+    logger.debug(f"  Status: {alert.status}")
+    logger.debug(f"  Labels: {alert.labels}")
+    logger.debug(f"  Starts At: {alert.starts_at}")
 
     # Check if alert has registered prompt mapping
     if not alert_registry.has_alert(alert_name):
-        logger.warning(f"Alert '{alert_name}' has no registered prompt mapping, skipping")
+        logger.debug(f"Alert '{alert_name}' has no registered prompt mapping, skipping")
         return None
 
     # Check if Temporal client is available

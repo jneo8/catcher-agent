@@ -26,13 +26,14 @@ description: |
 
 config:
   options:
-    alert-prompts-file:
+    alert-prompts:
       type: string
-      default: "/etc/catcher-agent/alert-prompts.yaml"
+      default: ""
       description: |
-        Path to the YAML file containing alert-to-prompt mappings.
-        This file defines which AI prompts and MCP servers to use for each alert type.
-        The file should be mounted into the container at this path (e.g., via ConfigMap).
+        YAML string content containing alert-to-prompt mappings.
+        This defines which AI prompts and MCP servers to use for each alert type.
+        The configuration should be provided as a YAML-formatted string that can be
+        dynamically configured. See alert-prompts-example.yaml for the expected format.
 
     temporal-host:
       type: string

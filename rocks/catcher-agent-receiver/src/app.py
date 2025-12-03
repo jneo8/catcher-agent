@@ -28,14 +28,15 @@ async def lifespan(app: FastAPI):
     logger.info("Application startup")
 
     # Load alert prompt registry
-    alert_prompts_file = os.getenv("ALERT_PROMPTS_FILE", "/etc/catcher-agent/alert-prompts.yaml")
+    alert_prompts = os.getenv("ALERT_PROMPTS", "")
     try:
-        app.state.alert_registry = AlertPromptRegistry.from_yaml(alert_prompts_file)
-        logger.info(f"Loaded {len(app.state.alert_registry.list_alerts())} alert configurations")
-    except FileNotFoundError:
-        logger.warning(f"Alert prompts file not found: {alert_prompts_file}")
-        logger.warning("No alert-to-prompt mappings will be available")
-        app.state.alert_registry = AlertPromptRegistry()
+        if alert_prompts:
+            app.state.alert_registry = AlertPromptRegistry.from_yaml_string(alert_prompts)
+            logger.info(f"Loaded {len(app.state.alert_registry.list_alerts())} alert configurations")
+        else:
+            logger.warning("ALERT_PROMPTS environment variable is empty")
+            logger.warning("No alert-to-prompt mappings will be available")
+            app.state.alert_registry = AlertPromptRegistry()
     except Exception as e:
         logger.error(f"Failed to load alert prompts: {e}")
         logger.warning("Starting with empty alert registry")
