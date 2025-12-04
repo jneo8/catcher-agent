@@ -23,30 +23,22 @@ class HelloWorkflow:
         # Dynamically reference MCP servers that were registered with the worker
         # Get the list of configured servers from workflow memo
         mcp_servers = []
-        available_mcps = []
 
         # Read MCP server names from memo (passed when workflow started)
-        server_names = workflow.memo_value("mcp_servers", default=[])
+        mcp_servers = workflow.memo_value("mcp_servers", default=[])
 
-        if server_names:
-            for server_name in server_names:
+        if mcp_servers:
+            for mcp_server in mcp_servers:
                 try:
                     # Reference the MCP server by name (case-sensitive)
-                    server = openai_agents.workflow.stateless_mcp_server(server_name)
+                    server = openai_agents.workflow.stateless_mcp_server(mcp_server)
                     mcp_servers.append(server)
-                    available_mcps.append(server_name)
-                    workflow.logger.info("Loaded MCP server: %s", server_name)
+                    workflow.logger.info("Loaded MCP server: %s", mcp_server)
                 except Exception as e:
-                    workflow.logger.warning("Failed to load MCP server '%s': %s", server_name, e)
+                    workflow.logger.warning("Failed to load MCP server '%s': %s", mcp_server, e)
 
-        # Build agent instructions based on available MCP servers
-        if available_mcps:
-            instructions = f"""You are an infrastructure assistant with access to {', '.join(available_mcps)} tools.
-Use the available tools when the user's request involves infrastructure management."""
-            workflow.logger.info("Agent initialized with %d MCP server(s): %s", len(available_mcps), ", ".join(available_mcps))
-        else:
-            instructions = "You are a helpful assistant."
-            workflow.logger.info("Agent initialized without MCP servers")
+        # Build agent instructions
+        instructions = "You are an infrastructure assistant. Use the available tools when the user's request involves infrastructure management."
 
         agent = Agent(
             name="Assistant",
