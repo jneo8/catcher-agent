@@ -10,7 +10,8 @@ from temporalio.worker import Worker
 
 from agents.extensions.models.litellm_provider import LitellmProvider
 from ein_agent_worker.mcp_providers import MCPConfig, MCPProviderRegistry
-from ein_agent_worker.workflows.helloworld import HelloWorkflow
+from ein_agent_worker.workflows.single_alert_investigation import SingleAlertInvestigationWorkflow
+from ein_agent_worker.workflows.incident_correlation import IncidentCorrelationWorkflow
 from temporalio.contrib.openai_agents import OpenAIAgentsPlugin, ModelActivityParameters
 
 logging.basicConfig(level=logging.INFO)
@@ -56,7 +57,7 @@ async def main():
     worker = Worker(
         client,
         task_queue=queue,
-        workflows=[HelloWorkflow],
+        workflows=[SingleAlertInvestigationWorkflow, IncidentCorrelationWorkflow],
     )
 
     logger.info("Worker started successfully on queue: %s", queue)

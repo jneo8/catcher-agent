@@ -9,8 +9,8 @@ async def main():
     )
 
     client = await Client.connect(client_opt=client_opt)
-    workflow_name = "HelloWorkflow"
-    workflow_id = "helloworld-id"
+    workflow_name = "SingleAlertInvestigationWorkflow"
+    workflow_id = "single-alert-investigation-id"
 
     enabled_server_names = ["kubernetes", "grafana"]
 
