@@ -105,110 +105,142 @@ juju:
   secret-id: <secret_id1>
 ```
 
-## Deploy Ein-Agent-API-Operator
+## Using Ein-Agent-CLI
 
-The ein-agent-api-operator is a FastAPI-based API service that accepts webhooks (including Alertmanager notifications) and triggers Ein agent workflows. It runs as a Juju charm on Kubernetes.
+The ein-agent-cli is a command-line tool that queries Alertmanager and triggers incident correlation workflows in Temporal.
 
-### Build and Push the ROCK Image
-
-```bash
-cd ./rocks/ein-agent-api
-
-# Generate requirements.txt from pyproject.toml
-uv lock
-make requirements
-
-# Build ROCK image
-make rock-build
-
-# Load into Docker
-make rock-load
-
-# Tag for registry
-make rock-tag
-```
-
-And make sure the image is import and available on the k8s registry.
-
-### Build the Charm
+### Installation
 
 ```bash
-cd ../../ein-agent-api-operator
+cd ./ein-agent-cli
 
-# Build charm package
-make charm-build
+# Install dependencies using uv
+uv sync
+
+# Or install in development mode
+uv pip install -e .
 ```
 
-This will create a `ein-agent-api-operator_amd64.charm` file.
+### Basic Usage
 
-### Deploy the Charm
-
-Deploy the charm with the app image as a resource:
-
-> This tutorial deploy the receiver in the same juju model as temporal.
-> You can switch to different model but remember to change the namespace in the address.
+Query Alertmanager and trigger workflows:
 
 ```bash
-juju switch temporal
+# Run with default settings (queries local Alertmanager)
+uv run python -m ein_agent_cli
 
-# Deploy with specific image version
-juju deploy ./ein-agent-api-operator_amd64.charm \
-    --resource app-image=ghcr.io/jneo8/ein-agent-api:0.1
+# Query remote Alertmanager
+uv run python -m ein_agent_cli \
+    -a http://alertmanager.example.com:9093 \
+    --temporal-host temporal-k8s.temporal.svc.cluster.local:7233
+
+# Dry run to see what would be triggered without actually triggering
+uv run python -m ein_agent_cli --dry-run
+
+# Skip confirmation prompt and trigger automatically
+uv run python -m ein_agent_cli -y
 ```
 
-### Config ein agent api operator
+### Filtering Alerts
 
-```sh
-juju config ein-agent-api alert-prompts=@./alert-prompts-example.yaml
-juju config ein-agent-api temporal-host=temporal-k8s.temporal.svc.cluster.local:7233
-```
-
-### Access the Webhook Service
-
-The service exposes several endpoints:
-
-- `GET /` - Root endpoint (returns service status)
-- `GET /health` - Health check endpoint
-- `POST /webhook/alertmanager` - Alertmanager webhook endpoint
-
-To access the service, you can use port-forwarding:
+Filter alerts by name or fingerprint:
 
 ```bash
-# Get the pod name
-kubectl get pods -n <model-name> | grep ein-agent-api
+# Include only specific alerts by name
+uv run python -m ein_agent_cli \
+    -i KubePodNotReady \
+    -i KubePodCrashLooping
 
-# Port forward to local machine
-kubectl port-forward -n temporal svc/ein-agent-api 8080:8080
+# Include specific alerts by fingerprint
+uv run python -m ein_agent_cli -i 07d5a192e71c
 
-# Test the endpoints
-curl http://localhost:8080/
-curl http://localhost:8080/health
+# Mix alert names and fingerprints
+uv run python -m ein_agent_cli \
+    -i KubePodNotReady \
+    -i 07d5a192e71c
+
+# Custom blacklist (exclude specific alerts)
+uv run python -m ein_agent_cli -b TargetDown -b Watchdog
+
+# Disable default blacklist
+uv run python -m ein_agent_cli -b ''
 ```
 
-### Configure Alertmanager
+### Filtering by Status
 
-> Please make sure you have cos-lite deployed before this step.
+```bash
+# Only firing alerts (default)
+uv run python -m ein_agent_cli --status firing
 
-Configure Alertmanager to send notifications to the webhook endpoint:
+# Only resolved alerts
+uv run python -m ein_agent_cli --status resolved
 
-```yaml
-# alertmanager.yml
-receivers:
-  - name: 'ein-agent'
-    webhook_configs:
-      - url: 'http://ein-agent-api.temporal.svc.cluster.local:8080/webhook/alertmanager'
-        send_resolved: true
-
-route:
-  receiver: 'ein-agent'
-  group_by: ['alertname']
-  group_wait: 10s
-  group_interval: 10s
-  repeat_interval: 1h
+# All alerts regardless of status
+uv run python -m ein_agent_cli --status all
 ```
 
-Then using below command to see the request received by the API:
+### Display Options
 
-```sh
-kubectl logs -f -n temporal ein-agent-api-0 -c app
+```bash
+# Show full labels in the alert table
+uv run python -m ein_agent_cli --show-labels
+
+# Example output without --show-labels:
+# Shows: #, Alert Name, Status, Severity, Namespace, Fingerprint
+
+# Example output with --show-labels:
+# Shows: #, Alert Name, Status, Severity, Namespace, Fingerprint, Labels
+```
+
+### Configuration
+
+Configure Temporal connection:
+
+```bash
+# Set Temporal host, namespace, and queue
+uv run python -m ein_agent_cli \
+    --temporal-host localhost:7233 \
+    --temporal-namespace default \
+    --temporal-queue ein-agent-queue
+```
+
+Configure MCP servers to use:
+
+```bash
+# Specify MCP servers (default: kubernetes, grafana)
+uv run python -m ein_agent_cli \
+    -m kubernetes \
+    -m grafana \
+    -m prometheus
+```
+
+### Complete Example
+
+```bash
+# Query Alertmanager, filter alerts, review, and trigger workflow
+uv run python -m ein_agent_cli \
+    -a http://10.100.100.12/cos-alertmanager \
+    --temporal-host temporal-k8s.temporal.svc.cluster.local:7233 \
+    --temporal-namespace default \
+    --status firing \
+    -i KubePodNotReady \
+    -i KubePodCrashLooping \
+    -b Watchdog \
+    -m kubernetes \
+    -m grafana \
+    --show-labels
+
+# Automated workflow trigger (no confirmation prompt)
+uv run python -m ein_agent_cli \
+    -a http://10.100.100.12/cos-alertmanager \
+    --temporal-host temporal-k8s.temporal.svc.cluster.local:7233 \
+    -i KubePodNotReady \
+    -y
+```
+
+### Getting Help
+
+```bash
+# Show all available options
+uv run python -m ein_agent_cli --help
 ```
