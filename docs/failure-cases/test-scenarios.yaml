@@ -73,3 +73,26 @@ spec:
     image: busybox:latest
     command: ["/bin/sh", "-c", "echo 'Application starting...'; sleep 5; echo 'Application crashed!'; exit 1"]
     # SCENARIO C: Container exits with error code, pod enters Failed phase
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-not-ready-node
+  namespace: failure-cases
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: test-node
+            operator: In
+            values:
+            - "true"
+          - key: failure-node  # SCENARIO D: Deploy a pod on a not ready node
+            operator: In
+            values:
+            - "true"
+  containers:
+  - name: app
+    image: nginx:latest
