@@ -5,8 +5,8 @@ from typing import List, Optional
 
 import typer
 
-from ein_agent_cli import orchestrator
-from ein_agent_cli.models import WorkflowConfig
+from ein_agent_cli import orchestrators, console
+from ein_agent_cli.models import IncidentWorkflowConfig, HumanInLoopConfig
 
 app = typer.Typer(help="Ein Agent CLI - Incident investigation and correlation")
 
@@ -118,7 +118,7 @@ def run_incident_workflow(
       ein-agent-cli run-incident-workflow -y
     """
     # Create workflow configuration from CLI arguments
-    config = WorkflowConfig.from_cli_args(
+    config = IncidentWorkflowConfig.from_cli_args(
         alertmanager_url=alertmanager_url,
         include=include,
         mcp_servers=mcp_servers,
@@ -134,4 +134,100 @@ def run_incident_workflow(
     )
 
     # Run orchestrator with validated configuration
-    asyncio.run(orchestrator.run_incident_workflow(config))
+    asyncio.run(orchestrators.run_incident_workflow(config))
+
+
+@app.command()
+def human_in_loop(
+    mcp_servers: List[str] = typer.Option(
+        ["kubernetes", "grafana"],
+        "--mcp-server",
+        "-m",
+        help="MCP server names to use",
+    ),
+    temporal_host: str = typer.Option(
+        None,
+        "--temporal-host",
+        help="Temporal server host:port",
+    ),
+    temporal_namespace: str = typer.Option(
+        None,
+        "--temporal-namespace",
+        help="Temporal namespace",
+    ),
+    temporal_queue: str = typer.Option(
+        None,
+        "--temporal-queue",
+        help="Temporal task queue",
+    ),
+    workflow_id: Optional[str] = typer.Option(
+        None,
+        "--workflow-id",
+        help="Custom workflow ID",
+    ),
+    poll_interval: int = typer.Option(
+        2,
+        "--poll-interval",
+        help="Status poll interval in seconds",
+    ),
+    max_iterations: int = typer.Option(
+        50,
+        "--max-iterations",
+        help="Maximum workflow iterations",
+    ),
+    context_json: Optional[str] = typer.Option(
+        None,
+        "--context",
+        "-c",
+        help="Additional context as JSON string",
+    ),
+):
+    """Interactive human-in-the-loop workflow execution.
+
+    This command enables you to work with AI agents in an interactive manner.
+    The agent will execute tasks using MCP servers and will ask for your input
+    when it needs help with decisions, tool execution, or clarifications.
+
+    Examples:
+
+      # Basic usage
+      ein-agent-cli human-in-loop
+
+      # With specific MCP servers
+      ein-agent-cli human-in-loop -m kubernetes -m prometheus
+
+      # With additional context
+      ein-agent-cli human-in-loop \\
+          --context '{"alert": "HighLatency", "severity": "critical"}'
+
+      # Custom Temporal configuration
+      ein-agent-cli human-in-loop \\
+          --temporal-host temporal.example.com:7233 \\
+          --temporal-namespace production
+    """
+    import json
+
+    # Parse context JSON if provided
+    context = {}
+    if context_json:
+        try:
+            context = json.loads(context_json)
+        except json.JSONDecodeError as e:
+            console.print_error(f"Invalid JSON in --context: {e}")
+            raise typer.Exit(1)
+
+    # Create configuration from CLI arguments
+    config = HumanInLoopConfig.from_cli_args(
+        query="",  # Empty query - will be provided interactively
+        mcp_servers=mcp_servers,
+        temporal_host=temporal_host,
+        temporal_namespace=temporal_namespace,
+        temporal_queue=temporal_queue,
+        workflow_id=workflow_id,
+        poll_interval=poll_interval,
+        max_iterations=max_iterations,
+        context=context,
+    )
+
+    # Run orchestrator
+    asyncio.run(orchestrators.run_human_in_loop(config))

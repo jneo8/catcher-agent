@@ -7,14 +7,14 @@ from ein_agent_cli import console
 from ein_agent_cli.alertmanager import query_alertmanager, filter_alerts
 from ein_agent_cli.temporal import trigger_incident_workflow
 from ein_agent_cli.models import (
-    WorkflowConfig,
+    IncidentWorkflowConfig,
     AlertmanagerQueryParams,
     AlertFilterParams,
     TemporalWorkflowParams,
 )
 
 
-async def run_incident_workflow(config: WorkflowConfig) -> None:
+async def run_incident_workflow(config: IncidentWorkflowConfig) -> None:
     """Orchestrate incident correlation workflow execution.
 
     Args:

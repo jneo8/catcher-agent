@@ -171,10 +171,21 @@ class CorrectiveRcaWorkflow:
 
 def _load_mcp_servers() -> List[Any]:
     """Load MCP servers from workflow memo."""
+    # Configure MCP activities to fail fast (no retries)
+    mcp_activity_config = workflow.ActivityConfig(
+        start_to_close_timeout=workflow.timedelta(seconds=60),
+        retry_policy=workflow.RetryPolicy(maximum_attempts=1),
+    )
+
     mcp_servers = []
     for name in workflow.memo_value("mcp_servers", default=[]):
         try:
-            mcp_servers.append(openai_agents.workflow.stateless_mcp_server(name))
+            mcp_servers.append(
+                openai_agents.workflow.stateless_mcp_server(
+                    name,
+                    config=mcp_activity_config,
+                )
+            )
         except Exception as e:
             workflow.logger.warning(f"Failed to load MCP server '{name}': {e}")
     return mcp_servers

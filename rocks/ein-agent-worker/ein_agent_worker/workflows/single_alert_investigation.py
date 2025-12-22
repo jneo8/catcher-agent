@@ -58,12 +58,21 @@ class SingleAlertInvestigationWorkflow:
         # Get the list of configured servers from workflow memo
         mcp_server_names = workflow.memo_value("mcp_servers", default=[])
 
+        # Configure MCP activities to fail fast (no retries)
+        mcp_activity_config = workflow.ActivityConfig(
+            start_to_close_timeout=workflow.timedelta(seconds=60),
+            retry_policy=workflow.RetryPolicy(maximum_attempts=1),
+        )
+
         mcp_servers = []
         if mcp_server_names:
             for mcp_server_name in mcp_server_names:
                 try:
                     # Reference the MCP server by name (case-sensitive)
-                    server = openai_agents.workflow.stateless_mcp_server(mcp_server_name)
+                    server = openai_agents.workflow.stateless_mcp_server(
+                        mcp_server_name,
+                        config=mcp_activity_config,
+                    )
                     mcp_servers.append(server)
                     workflow.logger.info("Loaded MCP server: %s", mcp_server_name)
                 except Exception as e:
