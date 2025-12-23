@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import typer
 
-from ein_agent_cli import orchestrators, console
+from ein_agent_cli import orchestrators
 from ein_agent_cli.models import IncidentWorkflowConfig, HumanInLoopConfig
 
 app = typer.Typer(help="Ein Agent CLI - Incident investigation and correlation")

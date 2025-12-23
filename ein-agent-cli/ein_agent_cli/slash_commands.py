@@ -1,6 +1,5 @@
 """Implementation of interactive slash commands."""
 
-import asyncio
 import json
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Any
@@ -14,18 +13,23 @@ from temporalio.client import Client as TemporalClient
 
 from ein_agent_cli import console
 from ein_agent_cli.models import (
-    AlertFilterParams,
     AlertmanagerQueryParams,
     ContextItem,
     ContextItemType,
     HumanInLoopConfig,
     SessionState,
-    WorkflowStatus,
     WorkflowAlert,
 )
 from ein_agent_cli.temporal import get_workflow_status, list_workflows
-from ein_agent_cli.alertmanager import query_alertmanager, filter_alerts
+from ein_agent_cli.alertmanager import query_alertmanager
 
+
+
+PASS_1_RCA_PROMPT = """You are an RCA analyst. Your task is to perform a root cause analysis for the given alert.
+
+Here is the alert details:
+{alert_details}
+"""
 
 class WorkflowCompleter(Completer):
     """Completer that provides auto-completion for workflow selection."""
@@ -124,6 +128,8 @@ class CommandResult:
         should_switch: bool = False,
         should_create_new: bool = False,
         new_workflow_prompt: Optional[str] = None,
+        should_complete: bool = False,
+        should_reset: bool = False,
     ):
         self.should_continue = should_continue
         self.should_exit = should_exit
@@ -131,6 +137,7 @@ class CommandResult:
         self.should_switch = should_switch  # Signal to switch to workflow_id
         self.should_create_new = should_create_new  # Signal to create new workflow
         self.new_workflow_prompt = new_workflow_prompt  # Task for new workflow
+        self.should_complete = should_complete # Signal to complete the workflow
 
 
 class SlashCommand(ABC):
@@ -267,6 +274,24 @@ class RefreshCommand(SlashCommand):
         return CommandResult()
 
 
+class CompleteCommand(SlashCommand):
+    """Completes the current workflow."""
+    @property
+    def name(self) -> str:
+        return "complete"
+
+    @property
+    def description(self) -> str:
+        return "Complete the current workflow without exiting the CLI"
+
+    async def execute(self, args: str, config: HumanInLoopConfig, client: TemporalClient, session: SessionState) -> CommandResult:
+        if not session.current_workflow_id:
+            console.print_warning("No active workflow to complete.")
+            return CommandResult()
+
+        return CommandResult(should_complete=True)
+
+
 class EndCommand(SlashCommand):
     """Ends the current conversation and exits the CLI."""
     @property
@@ -293,11 +318,11 @@ class SwitchCommand(SlashCommand):
         return "Switch between workflows (shows running workflows with dropdown)"
 
     async def execute(self, args: str, config: HumanInLoopConfig, client: TemporalClient, session: SessionState) -> CommandResult:
-        # Get list of running workflows
-        workflows = await list_workflows(config.temporal, "Running")
+        # Get list of all workflows
+        workflows = await list_workflows(config.temporal)
 
         if not workflows:
-            console.print_info("No running workflows found.")
+            console.print_info("No workflows found.")
             return CommandResult()
 
         # Display workflow table
@@ -315,7 +340,7 @@ class SwitchCommand(SlashCommand):
             start_time = wf.get("start_time", "N/A")
             status_marker = "[CURRENT]" if wf_id == session.current_workflow_id else ""
 
-            table.add_row(wf_id, wf_type, start_time, status_marker)
+            table.add_row(wf_id, wf_type, start_time, f"{wf.get('status', 'N/A')} {status_marker}")
 
         console.print_table(table)
         console.print_newline()
@@ -357,10 +382,6 @@ class SwitchCommand(SlashCommand):
                 # Verify the workflow is accessible
                 try:
                     status = await get_workflow_status(client, selected_workflow_id)
-                    if status.state in ["completed", "failed"]:
-                        console.print_error(f"Cannot switch: workflow is {status.state}")
-                        return CommandResult()
-
                     console.print_success(f"✓ Switched to workflow: {selected_workflow_id}")
                     console.print_dim(f"Current state: {status.state}")
                     return CommandResult(should_switch=True, workflow_id=selected_workflow_id)
@@ -798,23 +819,27 @@ class AlertsCommand(SlashCommand):
                     continue
 
                 # Show action menu
-                action = await self._show_action_menu(selected_item, session)
+                action_result = await self._show_action_menu(selected_item, session)
 
-                if action == "back":
+                if isinstance(action_result, CommandResult):
+                    # This means a new workflow should be started
+                    return action_result
+
+                if action_result == "back":
                     # Refresh alert list
                     alert_items = session.local_context.get_items_by_type(ContextItemType.ALERT)
                     if not alert_items:
                         console.print_info("No more alerts in local context.")
                         return CommandResult()
                     continue
-                elif action == "quit":
+                elif action_result == "quit":
                     return CommandResult()
 
             except (KeyboardInterrupt, EOFError):
                 console.print_warning("Cancelled.")
                 return CommandResult()
 
-    async def _show_action_menu(self, alert_item: ContextItem, session: SessionState) -> str:
+    async def _show_action_menu(self, alert_item: ContextItem, session: SessionState) -> Any:
         """Show action menu for selected alert.
 
         Args:
@@ -822,14 +847,15 @@ class AlertsCommand(SlashCommand):
             session: The session state
 
         Returns:
-            Action result: "back", "quit"
+            Action result: "back", "quit", or a CommandResult object
         """
         while True:
             console.print_newline()
             console.print_info("Alert Actions:")
             console.print_message("  [1] View Details")
             console.print_message("  [2] Remove from context")
-            console.print_message("  [3] Back to alert list")
+            console.print_message("  [3] Start RCA workflow")
+            console.print_message("  [4] Back to alert list")
             console.print_newline()
 
             try:
@@ -854,13 +880,21 @@ class AlertsCommand(SlashCommand):
                     else:
                         console.print_info("Cancelled")
                         continue
-
+                
                 elif choice == 3:
+                    # Start RCA workflow
+                    alert_details = json.dumps(alert_item.data, indent=2)
+                    prompt = PASS_1_RCA_PROMPT.format(
+                        alert_details=alert_details
+                    )
+                    return CommandResult(should_create_new=True, new_workflow_prompt=prompt)
+
+                elif choice == 4:
                     # Back to list
                     return "back"
 
                 else:
-                    console.print_error("Invalid choice. Please select 1, 2, or 3.")
+                    console.print_error("Invalid choice. Please select 1, 2, 3 or 4.")
                     continue
 
             except (KeyboardInterrupt, EOFError):
