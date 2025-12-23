@@ -89,7 +89,7 @@ def convert_alertmanager_alert(am_alert: AlertmanagerAlert) -> Dict[str, Any]:
 
 
 def filter_alerts(params: AlertFilterParams) -> List[AlertmanagerAlert]:
-    """Filter alerts by blacklist, whitelist and status.
+    """Filter alerts by whitelist and status.
 
     Args:
         params: Alert filter parameters
@@ -101,18 +101,12 @@ def filter_alerts(params: AlertFilterParams) -> List[AlertmanagerAlert]:
     alert_registry = AlertRegistry(alerts_whitelist=params.whitelist)
 
     filtered = []
-    blacklisted_count = 0
 
     for alert in params.alerts:
         # Extract alert name, fingerprint, and status from Pydantic model
         alert_name = alert.labels.get("alertname", "unknown")
         alert_status = alert.status.state
         fingerprint = alert.fingerprint
-
-        # Apply blacklist filter first
-        if params.blacklist and alert_name in params.blacklist:
-            blacklisted_count += 1
-            continue
 
         # Apply status filter
         if params.status_filter and alert_status != params.status_filter:
@@ -124,7 +118,5 @@ def filter_alerts(params: AlertFilterParams) -> List[AlertmanagerAlert]:
 
         filtered.append(alert)
 
-    if blacklisted_count > 0:
-        console.print_dim(f"Blacklisted {blacklisted_count} alerts: {params.blacklist}")
     console.print_success(f"Filtered {len(filtered)}/{len(params.alerts)} alerts")
     return filtered

@@ -3,7 +3,7 @@
 import os
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -157,12 +157,8 @@ class AlertFilterConfig(BaseModel):
         default=None,
         description="Alert names or fingerprints to include (whitelist)"
     )
-    blacklist: Optional[List[str]] = Field(
-        default=["Watchdog"],
-        description="Alert names to exclude (blacklist)"
-    )
     status: str = Field(
-        default="firing",
+        default="active",
         description="Filter alerts by status"
     )
 
@@ -170,17 +166,9 @@ class AlertFilterConfig(BaseModel):
     @classmethod
     def validate_status(cls, v: str) -> str:
         """Validate status value."""
-        valid_statuses = ['firing', 'resolved', 'all']
+        valid_statuses = ['firing', 'resolved', 'all', 'active']
         if v not in valid_statuses:
             raise ValueError(f"Status must be one of {valid_statuses}")
-        return v
-
-    @field_validator('blacklist')
-    @classmethod
-    def validate_blacklist(cls, v: Optional[List[str]]) -> Optional[List[str]]:
-        """Handle blacklist disable (empty string or empty list)."""
-        if v is not None and (len(v) == 0 or "" in v):
-            return None
         return v
 
 
@@ -257,7 +245,6 @@ class IncidentWorkflowConfig(BaseModel):
         temporal_queue: Optional[str],
         workflow_id: Optional[str],
         status: str,
-        blacklist: Optional[List[str]],
         dry_run: bool,
         show_labels: bool,
         no_prompt: bool,
@@ -273,7 +260,6 @@ class IncidentWorkflowConfig(BaseModel):
             temporal_queue: Temporal task queue
             workflow_id: Custom workflow ID
             status: Filter alerts by status
-            blacklist: Alert names to exclude
             dry_run: If True, don't trigger workflow
             show_labels: If True, show labels in alert table
             no_prompt: If True, skip confirmation prompt
@@ -291,7 +277,6 @@ class IncidentWorkflowConfig(BaseModel):
 
         filter_config = AlertFilterConfig(
             include=include,
-            blacklist=blacklist,
             status=status,
         )
 
@@ -338,10 +323,6 @@ class AlertFilterParams(BaseModel):
     whitelist: Optional[List[str]] = Field(
         default=None,
         description="Alert names or fingerprints to include (whitelist)"
-    )
-    blacklist: Optional[List[str]] = Field(
-        default=None,
-        description="Alert names to exclude (blacklist)"
     )
     status_filter: Optional[str] = Field(
         default=None,
@@ -429,6 +410,118 @@ class WorkflowStatus(BaseModel):
         return v
 
 
+# Local context models for investigation
+
+class ContextItemType(str, Enum):
+    """Types of items that can be stored in local context."""
+
+    ALERT = "alert"
+
+
+class ContextItem(BaseModel):
+    """A single item in the local context."""
+
+    item_id: str = Field(
+        description="Unique identifier for this item (e.g., alert fingerprint)"
+    )
+    item_type: ContextItemType = Field(
+        description="Type of context item"
+    )
+    data: Dict[str, Any] = Field(
+        description="The actual data (alert object, log entry, etc.)"
+    )
+    imported_at: str = Field(
+        default_factory=lambda: datetime.now().isoformat(),
+        description="When this item was imported"
+    )
+    tags: List[str] = Field(
+        default_factory=list,
+        description="User-defined tags for organization"
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description="Source of the data (e.g., Alertmanager URL)"
+    )
+
+
+class LocalContext(BaseModel):
+    """Local context store for investigation data."""
+
+    items: Dict[str, ContextItem] = Field(
+        default_factory=dict,
+        description="Context items indexed by item_id"
+    )
+
+    def add_item(self, item: ContextItem) -> None:
+        """Add an item to the context."""
+        self.items[item.item_id] = item
+
+    def remove_item(self, item_id: str) -> bool:
+        """Remove an item from context. Returns True if found and removed."""
+        if item_id in self.items:
+            del self.items[item_id]
+            return True
+        return False
+
+    def get_item(self, item_id: str) -> Optional[ContextItem]:
+        """Get an item by ID."""
+        return self.items.get(item_id)
+
+    def get_items_by_type(self, item_type: ContextItemType) -> List[ContextItem]:
+        """Get all items of a specific type."""
+        return [item for item in self.items.values() if item.item_type == item_type]
+
+    def get_alerts(self) -> List[Dict[str, Any]]:
+        """Convenience method to get all alerts."""
+        alert_items = self.get_items_by_type(ContextItemType.ALERT)
+        return [item.data for item in alert_items]
+
+    def clear(self) -> None:
+        """Clear all context items."""
+        self.items.clear()
+
+    def count(self) -> int:
+        """Get total number of context items."""
+        return len(self.items)
+
+    def count_by_type(self, item_type: ContextItemType) -> int:
+        """Get count of items by type."""
+        return len(self.get_items_by_type(item_type))
+
+
+class SessionState(BaseModel):
+    """State for managing multiple workflow sessions."""
+
+    connected_workflows: List[str] = Field(
+        default_factory=list,
+        description="List of workflow IDs the session is connected to"
+    )
+    current_workflow_id: Optional[str] = Field(
+        default=None,
+        description="Currently active workflow ID"
+    )
+    local_context: LocalContext = Field(
+        default_factory=LocalContext,
+        description="Local investigation context"
+    )
+
+    def add_workflow(self, workflow_id: str) -> None:
+        """Add a workflow to the session and make it current."""
+        if workflow_id not in self.connected_workflows:
+            self.connected_workflows.append(workflow_id)
+        self.current_workflow_id = workflow_id
+
+    def switch_to(self, workflow_id: str) -> None:
+        """Switch to a different workflow."""
+        if workflow_id not in self.connected_workflows:
+            self.connected_workflows.append(workflow_id)
+        self.current_workflow_id = workflow_id
+
+    def has_workflows(self) -> bool:
+        """Check if there are any connected workflows."""
+        return len(self.connected_workflows) > 0
+
+
 class HumanInLoopConfig(BaseModel):
     """Configuration for human-in-the-loop workflow."""
 
@@ -452,6 +545,10 @@ class HumanInLoopConfig(BaseModel):
         ge=1,
         le=200
     )
+    alertmanager_url: Optional[str] = Field(
+        default=None,
+        description="Alertmanager URL for importing alerts (optional)"
+    )
     temporal: TemporalConfig = Field(
         default_factory=TemporalConfig,
         description="Temporal configuration"
@@ -467,6 +564,7 @@ class HumanInLoopConfig(BaseModel):
         workflow_id: Optional[str],
         poll_interval: int,
         max_iterations: int,
+        alertmanager_url: Optional[str] = None,
     ) -> "HumanInLoopConfig":
         """Create HumanInLoopConfig from CLI arguments.
 
@@ -478,6 +576,7 @@ class HumanInLoopConfig(BaseModel):
             workflow_id: Custom workflow ID
             poll_interval: Status poll interval in seconds
             max_iterations: Maximum workflow iterations
+            alertmanager_url: Alertmanager URL for importing alerts (optional)
 
         Returns:
             HumanInLoopConfig instance
@@ -495,5 +594,6 @@ class HumanInLoopConfig(BaseModel):
             workflow_id=workflow_id,
             poll_interval=poll_interval,
             max_iterations=max_iterations,
+            alertmanager_url=alertmanager_url,
             temporal=temporal_config,
         )

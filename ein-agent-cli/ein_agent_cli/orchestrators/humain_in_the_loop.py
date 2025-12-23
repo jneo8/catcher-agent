@@ -11,11 +11,14 @@ from temporalio.client import Client as TemporalClient
 from ein_agent_cli import console
 from ein_agent_cli.completer import SlashCommandCompleter
 from ein_agent_cli.slash_commands import (
+    AlertsCommand,
     CommandRegistry,
-    ConnectWorkflowCommand,
     EndCommand,
     handle_command,
+    ImportAlertsCommand,
+    NewCommand,
     RefreshCommand,
+    SwitchCommand,
     WorkflowsCommand,
 )
 from ein_agent_cli.temporal import (
@@ -27,6 +30,7 @@ from ein_agent_cli.temporal import (
 )
 from ein_agent_cli.models import (
     HumanInLoopConfig,
+    SessionState,
     WorkflowStatus,
     UserAction,
     ActionType,
@@ -45,44 +49,35 @@ async def run_human_in_loop(config: HumanInLoopConfig) -> None:
             namespace=config.temporal.namespace,
         )
 
+        # Initialize session state for managing multiple workflows
+        session = SessionState()
+
         # Initialize and populate the command registry
         registry = CommandRegistry()
         registry.register(WorkflowsCommand())
-        registry.register(ConnectWorkflowCommand())
+        registry.register(SwitchCommand())
+        registry.register(NewCommand())
         registry.register(RefreshCommand())
         registry.register(EndCommand())
+        registry.register(ImportAlertsCommand())
+        registry.register(AlertsCommand())
 
-        workflow_id, user_prompt = await _initial_user_prompt_loop(config, client, registry)
+        # Initial prompt loop to get first workflow
+        workflow_id, user_prompt = await _initial_user_prompt_loop(config, client, registry, session)
 
         if not workflow_id:
             # A text prompt was provided, so we start a new workflow
-            console.print_newline()
-            console.print_info(f"Task: {user_prompt}")
-            console.print_newline()
-            console.print_info("Starting workflow...")
+            workflow_id = await _create_new_workflow(config, client, user_prompt)
 
-            workflow_id = await trigger_human_in_loop_workflow(
-                user_prompt=user_prompt,
-                config=config.temporal,
-                workflow_id=config.workflow_id,
-            )
-            await start_workflow_execution(
-                client=client,
-                workflow_id=workflow_id,
-                user_prompt=user_prompt,
-            )
-            console.print_success("✓ Agent is now working on your task")
-            console.print_newline()
-        else:
-            # We connected to an existing workflow
-            console.print_info("Resuming conversation...")
-            console.print_newline()
+        # Add workflow to session
+        session.add_workflow(workflow_id)
 
         console.print_dim(f"Workflow ID: {workflow_id}")
-        console.print_dim(f"(Use '/connect-workflow {workflow_id}' to resume this conversation later)")
+        console.print_dim(f"(Use '/switch' to switch between workflows, '/new' to create a new one)")
         console.print_newline()
 
-        await _interactive_workflow_loop(config, client, registry, workflow_id)
+        # Main interactive loop - handles workflow switching
+        await _main_session_loop(config, client, registry, session)
 
     except typer.Exit:
         raise
@@ -91,33 +86,94 @@ async def run_human_in_loop(config: HumanInLoopConfig) -> None:
         raise typer.Exit(1)
 
 
-async def _initial_user_prompt_loop(config: HumanInLoopConfig, client: TemporalClient, registry: CommandRegistry) -> (Optional[str], Optional[str]):
+async def _create_new_workflow(config: HumanInLoopConfig, client: TemporalClient, user_prompt: str) -> str:
+    """Create a new workflow with the given user prompt."""
+    console.print_newline()
+    console.print_info(f"Task: {user_prompt}")
+    console.print_newline()
+    console.print_info("Starting workflow...")
+
+    workflow_id = await trigger_human_in_loop_workflow(
+        user_prompt=user_prompt,
+        config=config.temporal,
+        workflow_id=config.workflow_id,
+    )
+    await start_workflow_execution(
+        client=client,
+        workflow_id=workflow_id,
+        user_prompt=user_prompt,
+    )
+    console.print_success("✓ Agent is now working on your task")
+    console.print_newline()
+    return workflow_id
+
+
+async def _initial_user_prompt_loop(config: HumanInLoopConfig, client: TemporalClient, registry: CommandRegistry, session_state: SessionState) -> (Optional[str], Optional[str]):
     """Handles the initial user prompt before a workflow starts."""
     if config.user_prompt and config.user_prompt.strip():
         return None, config.user_prompt
 
     # Create prompt session with auto-completion
     completer = SlashCommandCompleter(registry)
-    session = PromptSession(completer=completer)
+    prompt_session = PromptSession(completer=completer)
 
     console.print_info("What would you like the agent to help you with? (Type /help for commands)")
     while True:
-        user_input = await session.prompt_async("You: ")
+        user_input = await prompt_session.prompt_async("You: ")
         if not user_input.startswith('/'):
             # This is the main task prompt
             return None, user_input
 
-        result = await handle_command(user_input, registry, config, client, None)
+        result = await handle_command(user_input, registry, config, client, session_state)
         if result.should_exit:
             raise typer.Exit(0)
-        if not result.should_continue and result.workflow_id:
-            # Successfully connected to a workflow
+
+        # Handle new workflow creation
+        if result.should_create_new and result.new_workflow_prompt:
+            return None, result.new_workflow_prompt
+
+        # Handle workflow switching
+        if result.should_switch and result.workflow_id:
+            console.print_info("Resuming conversation...")
+            console.print_newline()
             return result.workflow_id, None
 
         console.print_newline()
 
-async def _interactive_workflow_loop(config: HumanInLoopConfig, client: TemporalClient, registry: CommandRegistry, workflow_id: str):
-    """The main interactive loop while a workflow is running."""
+
+async def _main_session_loop(config: HumanInLoopConfig, client: TemporalClient, registry: CommandRegistry, session: SessionState) -> None:
+    """Main session loop that handles multiple workflows and switching between them."""
+    while True:
+        current_workflow_id = session.current_workflow_id
+        if not current_workflow_id:
+            console.print_error("No active workflow in session.")
+            break
+
+        # Run the interactive loop for the current workflow
+        action = await _interactive_workflow_loop(config, client, registry, session)
+
+        # Handle the action returned by the interactive loop
+        if action == "exit":
+            break
+        elif action == "switch":
+            # The switch already happened in the loop, just continue
+            console.print_info(f"Now on workflow: {session.current_workflow_id}")
+            console.print_newline()
+            continue
+        elif action == "new_workflow":
+            # A new workflow was created and added to session, continue with it
+            console.print_info(f"Now on workflow: {session.current_workflow_id}")
+            console.print_newline()
+            continue
+
+
+async def _interactive_workflow_loop(config: HumanInLoopConfig, client: TemporalClient, registry: CommandRegistry, session: SessionState) -> str:
+    """The main interactive loop while a workflow is running.
+
+    Returns:
+        Action string: "exit", "switch", "new_workflow", or "completed"
+    """
+    workflow_id = session.current_workflow_id
     iteration = 0
     while iteration < config.max_iterations:
         iteration += 1
@@ -131,29 +187,43 @@ async def _interactive_workflow_loop(config: HumanInLoopConfig, client: Temporal
 
         elif status.state == "awaiting_input":
             _display_awaiting_input_status(status)
-            action = await _get_user_action(config, client, registry, workflow_id)
+            result = await _get_user_action(config, client, registry, session)
 
-            if action is None: # User requested to end the workflow
+            # Handle exit
+            if result is None:
                 console.print_warning("Ending workflow...")
                 await end_workflow(client, workflow_id)
-                break
+                return "exit"
 
+            # Handle workflow switching
+            if hasattr(result, 'should_switch') and result.should_switch and result.workflow_id:
+                session.switch_to(result.workflow_id)
+                return "switch"
+
+            # Handle new workflow creation
+            if hasattr(result, 'should_create_new') and result.should_create_new and result.new_workflow_prompt:
+                new_workflow_id = await _create_new_workflow(config, client, result.new_workflow_prompt)
+                session.add_workflow(new_workflow_id)
+                return "new_workflow"
+
+            # Normal user action - send to workflow
             console.print_dim("Sending action to agent...")
-            await provide_user_action(client, workflow_id, action)
+            await provide_user_action(client, workflow_id, result)
             console.print_success("✓ Action sent")
             console.print_newline()
 
         elif status.state == "completed":
             _display_completed_status(status, workflow_id, config.temporal)
-            break
+            return "completed"
         elif status.state == "failed":
             _display_failed_status(status)
             raise typer.Exit(1)
-        
+
     if iteration >= config.max_iterations:
         console.print_warning(f"Maximum iterations ({config.max_iterations}) reached")
         console.print_info("Ending workflow...")
         await end_workflow(client, workflow_id)
+        return "completed"
 
 
 def _display_executing_status(status: WorkflowStatus, iteration: int) -> None:
@@ -174,20 +244,34 @@ def _display_awaiting_input_status(status: WorkflowStatus) -> None:
         console.print_newline()
 
 
-async def _get_user_action(config: HumanInLoopConfig, client: TemporalClient, registry: CommandRegistry, workflow_id: str) -> Optional[UserAction]:
-    """Get user action via interactive prompt, handling slash commands."""
+async def _get_user_action(config: HumanInLoopConfig, client: TemporalClient, registry: CommandRegistry, session_state: SessionState):
+    """Get user action via interactive prompt, handling slash commands.
+
+    Returns:
+        UserAction, CommandResult, or None (for exit)
+    """
     # Create prompt session with auto-completion
     completer = SlashCommandCompleter(registry)
-    session = PromptSession(completer=completer)
+    prompt_session = PromptSession(completer=completer)
 
     while True:
-        content = await session.prompt_async("You: ")
+        content = await prompt_session.prompt_async("You: ")
         if not content.startswith('/'):
             return UserAction(action_type=ActionType.TEXT, content=content, metadata={})
 
-        result = await handle_command(content, registry, config, client, workflow_id)
+        result = await handle_command(content, registry, config, client, session_state)
+
+        # Handle exit
         if result.should_exit:
-            return None # Signal to the main loop to end the workflow
+            return None
+
+        # Handle workflow switching
+        if result.should_switch:
+            return result
+
+        # Handle new workflow creation
+        if result.should_create_new:
+            return result
 
         console.print_newline()
 

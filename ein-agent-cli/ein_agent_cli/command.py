@@ -53,15 +53,9 @@ def run_incident_workflow(
         help="Custom workflow ID",
     ),
     status: str = typer.Option(
-        "firing",
+        "active",
         "--status",
-        help="Filter alerts by status (firing/resolved/all)",
-    ),
-    blacklist: Optional[List[str]] = typer.Option(
-        None,
-        "--blacklist",
-        "-b",
-        help="Alert names to exclude (default: Watchdog). Use --blacklist '' to disable",
+        help="Filter alerts by status (firing/resolved/active/all)",
     ),
     dry_run: bool = typer.Option(
         False,
@@ -84,14 +78,13 @@ def run_incident_workflow(
 
     This command will:
     1. Query Alertmanager API for alerts
-    2. Filter alerts by blacklist (default: Watchdog)
-    3. Filter alerts by whitelist (if --include specified) - accepts alert names or fingerprints
-    4. Filter alerts by status (firing/resolved/all)
-    5. Trigger IncidentCorrelationWorkflow in Temporal
+    2. Filter alerts by whitelist (if --include specified) - accepts alert names or fingerprints
+    3. Filter alerts by status (firing/resolved/all)
+    4. Trigger IncidentCorrelationWorkflow in Temporal
 
     Examples:
 
-      # Run with default settings (blacklists Watchdog, includes all others)
+      # Run with default settings (includes all others)
       ein-agent-cli run-incident-workflow
 
       # Include only specific alerts by name
@@ -102,12 +95,6 @@ def run_incident_workflow(
 
       # Mix alert names and fingerprints
       ein-agent-cli run-incident-workflow -i KubePodNotReady -i a1b2c3d4e5f6
-
-      # Custom blacklist (exclude TargetDown and Watchdog)
-      ein-agent-cli run-incident-workflow -b TargetDown -b Watchdog
-
-      # Disable blacklist
-      ein-agent-cli run-incident-workflow -b ''
 
       # Query remote Alertmanager
       ein-agent-cli run-incident-workflow -a http://alertmanager.example.com:9093
@@ -128,7 +115,6 @@ def run_incident_workflow(
         temporal_queue=temporal_queue,
         workflow_id=workflow_id,
         status=status,
-        blacklist=blacklist,
         dry_run=dry_run,
         show_labels=show_labels,
         no_prompt=no_prompt,
@@ -140,6 +126,12 @@ def run_incident_workflow(
 
 @app.command()
 def human_in_loop(
+    alertmanager_url: str = typer.Option(
+        "http://localhost:9093",
+        "--alertmanager-url",
+        "-a",
+        help="Alertmanager URL",
+    ),
     temporal_host: str = typer.Option(
         None,
         "--temporal-host",
@@ -171,11 +163,13 @@ def human_in_loop(
         help="Maximum workflow iterations",
     ),
 ):
-    """Interactive human-in-the-loop workflow execution.
+    """Interactive human-in-the-loop workflow execution with multi-workflow support.
 
     This command enables you to work with AI agents in an interactive, conversational manner.
     The agent will execute tasks using MCP servers configured on the worker and will ask
     for your input when it needs help with decisions, tool execution, or clarifications.
+
+    You can manage multiple workflows simultaneously and switch between them on the fly.
 
     MCP servers are configured on the worker side via environment variables.
     See the worker documentation for MCP server configuration.
@@ -183,17 +177,23 @@ def human_in_loop(
     During the session:
     - Simply type your responses to interact with the agent
     - Type '/help' to see available commands
+    - Type '/switch' to switch between running workflows
+    - Type '/new' to create a new workflow
     - Type '/refresh' to get the latest workflow status
-    - Type '/connect-workflow <workflow-id>' to resume an existing conversation
+    - Type '/workflows' to list all workflows
 
     Examples:
 
       # Basic usage - you'll be prompted for your task
       ein-agent-cli human-in-loop
 
-      # Connect to an existing workflow
+      # Switch between workflows during a session
       ein-agent-cli human-in-loop
-      # Then at the prompt, type: /connect-workflow human-in-loop-20251223-105906
+      # Then type: /switch (and select from running workflows)
+
+      # Create multiple workflows
+      ein-agent-cli human-in-loop
+      # Type your first task, then later: /new <new task>
 
       # Custom Temporal configuration
       ein-agent-cli human-in-loop \\
@@ -209,6 +209,7 @@ def human_in_loop(
         workflow_id=workflow_id,
         poll_interval=poll_interval,
         max_iterations=max_iterations,
+        alertmanager_url=alertmanager_url,
     )
 
     # Run orchestrator
