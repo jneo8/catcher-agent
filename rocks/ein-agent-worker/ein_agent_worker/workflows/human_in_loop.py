@@ -106,6 +106,8 @@ class HumanInLoopWorkflow:
         """Signal to end the workflow gracefully."""
         workflow.logger.info("Received end_workflow signal")
         self.should_end = True
+        # Wake up the workflow if it's waiting for user action
+        self.action_received.set()
 
     @workflow.run
     async def run(self) -> str:
