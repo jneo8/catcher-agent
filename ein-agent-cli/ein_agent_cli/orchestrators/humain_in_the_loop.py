@@ -4,11 +4,12 @@ import asyncio
 from typing import Optional
 
 import typer
+from prompt_toolkit import PromptSession
 from rich.panel import Panel
-from rich.prompt import Prompt
 from temporalio.client import Client as TemporalClient
 
 from ein_agent_cli import console
+from ein_agent_cli.completer import SlashCommandCompleter
 from ein_agent_cli.slash_commands import (
     CommandRegistry,
     ConnectWorkflowCommand,
@@ -95,9 +96,13 @@ async def _initial_user_prompt_loop(config: HumanInLoopConfig, client: TemporalC
     if config.user_prompt and config.user_prompt.strip():
         return None, config.user_prompt
 
+    # Create prompt session with auto-completion
+    completer = SlashCommandCompleter(registry)
+    session = PromptSession(completer=completer)
+
     console.print_info("What would you like the agent to help you with? (Type /help for commands)")
     while True:
-        user_input = Prompt.ask("You")
+        user_input = await session.prompt_async("You: ")
         if not user_input.startswith('/'):
             # This is the main task prompt
             return None, user_input
@@ -108,7 +113,7 @@ async def _initial_user_prompt_loop(config: HumanInLoopConfig, client: TemporalC
         if not result.should_continue and result.workflow_id:
             # Successfully connected to a workflow
             return result.workflow_id, None
-        
+
         console.print_newline()
 
 async def _interactive_workflow_loop(config: HumanInLoopConfig, client: TemporalClient, registry: CommandRegistry, workflow_id: str):
@@ -171,15 +176,19 @@ def _display_awaiting_input_status(status: WorkflowStatus) -> None:
 
 async def _get_user_action(config: HumanInLoopConfig, client: TemporalClient, registry: CommandRegistry, workflow_id: str) -> Optional[UserAction]:
     """Get user action via interactive prompt, handling slash commands."""
+    # Create prompt session with auto-completion
+    completer = SlashCommandCompleter(registry)
+    session = PromptSession(completer=completer)
+
     while True:
-        content = Prompt.ask("You")
+        content = await session.prompt_async("You: ")
         if not content.startswith('/'):
             return UserAction(action_type=ActionType.TEXT, content=content, metadata={})
 
         result = await handle_command(content, registry, config, client, workflow_id)
         if result.should_exit:
             return None # Signal to the main loop to end the workflow
-        
+
         console.print_newline()
 
 
