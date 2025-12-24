@@ -430,28 +430,103 @@ class ContextItem(BaseModel):
     data: Dict[str, Any] = Field(
         description="The actual data (alert object, log entry, etc.)"
     )
-    imported_at: str = Field(
-        default_factory=lambda: datetime.now().isoformat(),
-        description="When this item was imported"
-    )
-    tags: List[str] = Field(
-        default_factory=list,
-        description="User-defined tags for organization"
-    )
     source: Optional[str] = Field(
         default=None,
         description="Source of the data (e.g., Alertmanager URL)"
     )
 
 
+class WorkflowMetadata(BaseModel):
+    """Metadata for workflows tracked in local context."""
+
+    workflow_id: str = Field(
+        description="Workflow ID"
+    )
+    alert_fingerprint: Optional[str] = Field(
+        default=None,
+        description="Alert fingerprint this workflow is for (if applicable)"
+    )
+    status: str = Field(
+        description="Workflow status: pending/running/completed/failed"
+    )
+    result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Workflow result/output (null when pending/running)"
+    )
+
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        """Validate status value."""
+        valid_statuses = ['pending', 'running', 'completed', 'failed']
+        if v not in valid_statuses:
+            raise ValueError(f"Status must be one of {valid_statuses}")
+        return v
+
+
+class EnrichmentRCAMetadata(WorkflowMetadata):
+    """Enrichment RCA workflow metadata with context info."""
+
+    enrichment_context: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Context used for enrichment (alerts, RCA outputs)"
+    )
+
+
+class CompactMetadata(BaseModel):
+    """Compact workflow metadata."""
+
+    workflow_id: str = Field(
+        description="Workflow ID"
+    )
+    source_workflow_ids: List[str] = Field(
+        description="Which workflows were compacted"
+    )
+    status: str = Field(
+        description="Workflow status: pending/running/completed/failed"
+    )
+    result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Compact result/output (null when pending/running)"
+    )
+
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        """Validate status value."""
+        valid_statuses = ['pending', 'running', 'completed', 'failed']
+        if v not in valid_statuses:
+            raise ValueError(f"Status must be one of {valid_statuses}")
+        return v
+
+
 class LocalContext(BaseModel):
     """Local context store for investigation data."""
 
+    # Alerts
     items: Dict[str, ContextItem] = Field(
         default_factory=dict,
-        description="Context items indexed by item_id"
+        description="Alerts indexed by fingerprint"
     )
 
+    # RCA Workflows (separate)
+    rca_workflows: Dict[str, WorkflowMetadata] = Field(
+        default_factory=dict,
+        description="RCA workflows indexed by workflow_id"
+    )
+
+    # Enrichment RCA Workflows (separate)
+    enrichment_rca_workflows: Dict[str, EnrichmentRCAMetadata] = Field(
+        default_factory=dict,
+        description="Enrichment RCA workflows indexed by workflow_id"
+    )
+
+    # Compact workflows (single entries)
+    compact_rca: Optional[CompactMetadata] = None
+    compact_enrichment_rca: Optional[CompactMetadata] = None
+    incident_summary: Optional[WorkflowMetadata] = None
+
+    # Alert management methods
     def add_item(self, item: ContextItem) -> None:
         """Add an item to the context."""
         self.items[item.item_id] = item
@@ -488,38 +563,232 @@ class LocalContext(BaseModel):
         """Get count of items by type."""
         return len(self.get_items_by_type(item_type))
 
+    # Workflow management methods
+    def add_rca_workflow(self, workflow: WorkflowMetadata) -> None:
+        """Add an RCA workflow to the context."""
+        self.rca_workflows[workflow.workflow_id] = workflow
 
-class SessionState(BaseModel):
-    """State for managing multiple workflow sessions."""
+    def add_enrichment_rca_workflow(self, workflow: EnrichmentRCAMetadata) -> None:
+        """Add an enrichment RCA workflow to the context."""
+        self.enrichment_rca_workflows[workflow.workflow_id] = workflow
 
-    connected_workflows: List[str] = Field(
-        default_factory=list,
-        description="List of workflow IDs the session is connected to"
+    def get_rca_for_alert(self, fingerprint: str) -> Optional[WorkflowMetadata]:
+        """Get RCA workflow for a specific alert fingerprint."""
+        for workflow in self.rca_workflows.values():
+            if workflow.alert_fingerprint == fingerprint:
+                return workflow
+        return None
+
+    def get_enrichment_rca_for_alert(self, fingerprint: str) -> Optional[EnrichmentRCAMetadata]:
+        """Get enrichment RCA workflow for a specific alert fingerprint."""
+        for workflow in self.enrichment_rca_workflows.values():
+            if workflow.alert_fingerprint == fingerprint:
+                return workflow
+        return None
+
+    def get_alerts_without_rca(self) -> List[str]:
+        """Get fingerprints of alerts without RCA workflows."""
+        alert_fingerprints = {item.item_id for item in self.items.values()}
+        rca_fingerprints = {w.alert_fingerprint for w in self.rca_workflows.values() if w.alert_fingerprint}
+        return list(alert_fingerprints - rca_fingerprints)
+
+    def get_alerts_without_enrichment_rca(self) -> List[str]:
+        """Get fingerprints of alerts with RCA but without enrichment RCA."""
+        rca_fingerprints = {w.alert_fingerprint for w in self.rca_workflows.values() if w.alert_fingerprint and w.status == 'completed'}
+        enrichment_fingerprints = {w.alert_fingerprint for w in self.enrichment_rca_workflows.values() if w.alert_fingerprint}
+        return list(rca_fingerprints - enrichment_fingerprints)
+
+    def get_completed_rca_workflows(self) -> List[WorkflowMetadata]:
+        """Get all completed RCA workflows."""
+        return [w for w in self.rca_workflows.values() if w.status == 'completed']
+
+    def get_completed_enrichment_rca_workflows(self) -> List[EnrichmentRCAMetadata]:
+        """Get all completed enrichment RCA workflows."""
+        return [w for w in self.enrichment_rca_workflows.values() if w.status == 'completed']
+
+    def remove_workflow(self, workflow_id: str) -> bool:
+        """Remove a workflow from context. Returns True if found and removed."""
+        # Check all workflow types
+        if workflow_id in self.rca_workflows:
+            del self.rca_workflows[workflow_id]
+            return True
+        if workflow_id in self.enrichment_rca_workflows:
+            del self.enrichment_rca_workflows[workflow_id]
+            return True
+        if self.compact_rca and self.compact_rca.workflow_id == workflow_id:
+            self.compact_rca = None
+            return True
+        if self.compact_enrichment_rca and self.compact_enrichment_rca.workflow_id == workflow_id:
+            self.compact_enrichment_rca = None
+            return True
+        if self.incident_summary and self.incident_summary.workflow_id == workflow_id:
+            self.incident_summary = None
+            return True
+        return False
+
+    def get_all_workflows(self) -> List[Dict[str, Any]]:
+        """Get all workflows as a list with type information."""
+        workflows = []
+
+        # RCA workflows
+        for w in self.rca_workflows.values():
+            workflows.append({
+                "workflow_id": w.workflow_id,
+                "type": "RCA",
+                "alert_fingerprint": w.alert_fingerprint,
+                "status": w.status,
+                "result": w.result,
+            })
+
+        # Enrichment RCA workflows
+        for w in self.enrichment_rca_workflows.values():
+            workflows.append({
+                "workflow_id": w.workflow_id,
+                "type": "EnrichmentRCA",
+                "alert_fingerprint": w.alert_fingerprint,
+                "status": w.status,
+                "result": w.result,
+                "enrichment_context": w.enrichment_context,
+            })
+
+        # Compact RCA
+        if self.compact_rca:
+            workflows.append({
+                "workflow_id": self.compact_rca.workflow_id,
+                "type": "CompactRCA",
+                "alert_fingerprint": None,
+                "status": self.compact_rca.status,
+                "result": self.compact_rca.result,
+                "source_workflow_ids": self.compact_rca.source_workflow_ids,
+            })
+
+        # Compact Enrichment RCA
+        if self.compact_enrichment_rca:
+            workflows.append({
+                "workflow_id": self.compact_enrichment_rca.workflow_id,
+                "type": "CompactEnrichmentRCA",
+                "alert_fingerprint": None,
+                "status": self.compact_enrichment_rca.status,
+                "result": self.compact_enrichment_rca.result,
+                "source_workflow_ids": self.compact_enrichment_rca.source_workflow_ids,
+            })
+
+        # Incident Summary
+        if self.incident_summary:
+            workflows.append({
+                "workflow_id": self.incident_summary.workflow_id,
+                "type": "IncidentSummary",
+                "alert_fingerprint": None,
+                "status": self.incident_summary.status,
+                "result": self.incident_summary.result,
+            })
+
+        return workflows
+
+
+class Context(BaseModel):
+    """A single investigation context with alerts and workflows."""
+
+    context_id: str = Field(
+        description="Unique context ID"
     )
-    current_workflow_id: Optional[str] = Field(
+    context_name: Optional[str] = Field(
         default=None,
-        description="Currently active workflow ID"
+        description="Optional user-friendly name for the context"
     )
     local_context: LocalContext = Field(
         default_factory=LocalContext,
-        description="Local investigation context"
+        description="Local investigation context (alerts and workflows)"
+    )
+    current_workflow_id: Optional[str] = Field(
+        default=None,
+        description="Currently active workflow ID in this context"
     )
 
+
+class SessionState(BaseModel):
+    """State for managing multiple investigation contexts."""
+
+    current_context_id: Optional[str] = Field(
+        default=None,
+        description="Currently active context ID"
+    )
+    contexts: Dict[str, "Context"] = Field(
+        default_factory=dict,
+        description="All contexts indexed by context_id"
+    )
+
+    def get_current_context(self) -> Optional[Context]:
+        """Get the currently active context."""
+        if self.current_context_id:
+            return self.contexts.get(self.current_context_id)
+        return None
+
+    def add_context(self, context: Context) -> None:
+        """Add a new context and make it current."""
+        self.contexts[context.context_id] = context
+        self.current_context_id = context.context_id
+
+    def switch_context(self, context_id: str) -> bool:
+        """Switch to a different context.
+
+        Returns:
+            True if switch successful, False if context_id not found
+        """
+        if context_id in self.contexts:
+            self.current_context_id = context_id
+            return True
+        return False
+
+    def remove_context(self, context_id: str) -> bool:
+        """Remove a context.
+
+        Returns:
+            True if removed, False if not found
+        """
+        if context_id in self.contexts:
+            del self.contexts[context_id]
+            # If we removed the current context, switch to another or None
+            if self.current_context_id == context_id:
+                if self.contexts:
+                    # Switch to first available context
+                    self.current_context_id = list(self.contexts.keys())[0]
+                else:
+                    self.current_context_id = None
+            return True
+        return False
+
+    # Legacy compatibility methods for current context
+    @property
+    def current_workflow_id(self) -> Optional[str]:
+        """Get current workflow ID from current context."""
+        context = self.get_current_context()
+        return context.current_workflow_id if context else None
+
+    @property
+    def local_context(self) -> Optional[LocalContext]:
+        """Get local context from current context."""
+        context = self.get_current_context()
+        return context.local_context if context else None
+
     def add_workflow(self, workflow_id: str) -> None:
-        """Add a workflow to the session and make it current."""
-        if workflow_id not in self.connected_workflows:
-            self.connected_workflows.append(workflow_id)
-        self.current_workflow_id = workflow_id
+        """Add a workflow to the current context and make it current."""
+        context = self.get_current_context()
+        if context:
+            context.current_workflow_id = workflow_id
 
     def switch_to(self, workflow_id: str) -> None:
-        """Switch to a different workflow."""
-        if workflow_id not in self.connected_workflows:
-            self.connected_workflows.append(workflow_id)
-        self.current_workflow_id = workflow_id
+        """Switch to a different workflow in current context."""
+        context = self.get_current_context()
+        if context:
+            context.current_workflow_id = workflow_id
 
     def has_workflows(self) -> bool:
-        """Check if there are any connected workflows."""
-        return len(self.connected_workflows) > 0
+        """Check if there are any workflows in current context."""
+        context = self.get_current_context()
+        if context:
+            return len(context.local_context.get_all_workflows()) > 0
+        return False
 
 
 class HumanInLoopConfig(BaseModel):
