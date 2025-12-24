@@ -6,6 +6,7 @@ from typing import Any
 import typer
 from prompt_toolkit import PromptSession
 from rich.panel import Panel
+from rich.table import Table
 from temporalio.client import Client as TemporalClient
 
 from ein_agent_cli import console
@@ -24,6 +25,7 @@ from ein_agent_cli.temporal import (
 )
 from ein_agent_cli.models import (
     CompactMetadata,
+    ContextItemType,
     EnrichmentRCAMetadata,
     HumanInLoopConfig,
     SessionState,
@@ -84,21 +86,58 @@ async def run_human_in_loop(config: HumanInLoopConfig) -> None:
         raise typer.Exit(1)
 
 
+
 def _display_main_menu(session: SessionState):
-    console.print_header("Main Menu")
+    """Displays the main menu dashboard."""
+    console.print_header("Ein Agent Dashboard")
     ctx = session.get_current_context()
-    if ctx:
-        alert_count = len(ctx.local_context.items)
-        wf_count = len(ctx.local_context.get_all_workflows())
-        console.print_dim(f"Current Context: {ctx.context_name or ctx.context_id} ({alert_count} alerts, {wf_count} workflows)")
+    if not ctx:
+        console.print_error("No active context.")
+        return
+
+    console.print_dim(f"Current Context: {ctx.context_name or ctx.context_id}")
+    console.print_newline()
+
+    alerts = ctx.local_context.get_items_by_type(ContextItemType.ALERT)
     
-    # Display running workflows
-    all_workflows = ctx.local_context.get_all_workflows() if ctx else []
-    if all_workflows:
-        console.print_info("Active Workflows in current context:")
-        for wf in all_workflows:
-            wf_id = wf.get("workflow_id")
-            console.print_message(f"  - {wf_id} {'(current)' if wf_id == ctx.current_workflow_id else ''}")
+    table = Table(title="Incident Status", show_header=True, header_style="bold magenta")
+    table.add_column("Alert Name", style="cyan")
+    table.add_column("Fingerprint", style="dim")
+    table.add_column("Severity", style="red")
+    table.add_column("RCA Workflow", style="yellow")
+    table.add_column("Enrichment RCA", style="green")
+
+    if not alerts:
+        console.print_info("No alerts in the current context. Use /import-alerts to begin.")
+    else:
+        for alert_item in alerts:
+            alert_data = alert_item.data
+            fingerprint = alert_item.item_id
+
+            rca_workflow = ctx.local_context.get_rca_for_alert(fingerprint)
+            enrichment_workflow = ctx.local_context.get_enrichment_rca_for_alert(fingerprint)
+
+            rca_status = f"[bold green]{rca_workflow.status}[/]" if rca_workflow else "[dim]missing[/]"
+            enrichment_status = f"[bold green]{enrichment_workflow.status}[/]" if enrichment_workflow else "[dim]missing[/]"
+
+            table.add_row(
+                alert_data.get("alertname", "N/A"),
+                fingerprint[:12] + "...",
+                alert_data.get("labels", {}).get("severity", "-"),
+                rca_status,
+                enrichment_status,
+            )
+        console.print_table(table)
+
+    # Optionally, still list non-alert-related workflows like CompactRCA
+    other_workflows = [
+        wf for wf in ctx.local_context.get_all_workflows() if not wf.get("alert_fingerprint")
+    ]
+    if other_workflows:
+        console.print_info("\nOther Workflows:")
+        for wf in other_workflows:
+            console.print_message(f"  - {wf.get('type')}: {wf.get('workflow_id')} ({wf.get('status')})")
+
 
     console.print_info("\nType /<command> to run an action. Press Tab for auto-completion, or /exit to quit.")
     console.print_newline()
