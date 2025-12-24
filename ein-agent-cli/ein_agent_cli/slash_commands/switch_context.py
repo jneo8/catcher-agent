@@ -4,10 +4,10 @@ from rich.table import Table
 from temporalio.client import Client as TemporalClient
 
 from ein_agent_cli import console
+from ein_agent_cli.completer import ContextCompleter
 from ein_agent_cli.models import HumanInLoopConfig, SessionState
 from ein_agent_cli.slash_commands.base import (
     CommandResult,
-    ContextCompleter,
     SlashCommand,
 )
 

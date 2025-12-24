@@ -24,6 +24,9 @@ class InteractiveList:
         item_actions: Optional[List[Dict[str, Any]]] = None,
         default_action: Optional[Callable] = None,
         session_state: Optional[Dict] = None,
+        finder: Optional[Callable] = None,
+        filter_keys: Optional[List[str]] = None,
+        filter_logic: Optional[Callable] = None,
     ):
         self.all_items = items
         self.item_name = item_name
@@ -34,7 +37,10 @@ class InteractiveList:
         self.item_actions = item_actions or []
         self.default_action = default_action
         self.session_state = session_state or {}
+        self.finder = finder or self._default_find_item
         self.filters: Dict[str, str] = {}
+        self.filter_keys = filter_keys or []
+        self.filter_logic = filter_logic or self._default_filter_logic
 
     async def run(self) -> Optional[CommandResult]:
         """Main loop for the interactive list."""
@@ -72,11 +78,7 @@ class InteractiveList:
         """Apply current filters to the list of items."""
         if not self.filters:
             return self.all_items
-        # This is a simple implementation. Commands can override this for more complex filtering.
-        # For now, we assume the command using this will implement its own filtering logic
-        # by overriding this method or by passing a filtering function.
-        # Let's keep it simple and assume no filtering for now.
-        return self.all_items
+        return self.filter_logic(self.all_items, self.filters)
 
     def _display_table(self, items: List[Any]):
         """Display the items in a table."""
@@ -110,21 +112,21 @@ class InteractiveList:
                 console.print_info("Cancelled.")
                 return None
 
-            selected_item = self._find_item(user_input, items)
+            selected_item = self.finder(user_input, items)
 
             if not selected_item:
                 console.print_error(f"{self.item_name.capitalize()} '{user_input}' not found.")
                 return None
 
             if self.default_action:
-                return await self.default_action(selected_item)
+                return await self.default_action(selected_item, self.session_state)
 
             return await self._show_action_menu(selected_item)
 
         except (KeyboardInterrupt, EOFError):
             return None
 
-    def _find_item(self, search_term: str, items: List[Any]) -> Optional[Any]:
+    def _default_find_item(self, search_term: str, items: List[Any]) -> Optional[Any]:
         """Find an item by index or a unique property."""
         try:
             choice = int(search_term)
@@ -164,17 +166,46 @@ class InteractiveList:
                     result = await action_handler(item, self.session_state)
                     if result is not None:
                         return result
-                    # if the handler returns None, we continue in the action menu loop
+                    # if the handler returns None, the action is considered complete for this item.
+                    # Break the action menu loop and go back to the main item list.
+                    break
                 else:
                     console.print_error("Invalid choice.")
 
             except (KeyboardInterrupt, EOFError):
                 return None
+
+    def _default_filter_logic(self, items: List[Any], filters: Dict[str, str]) -> List[Any]:
+        """A default, simple, case-insensitive filter logic."""
+        filtered_items = []
+        for item in items:
+            matches_all = True
+            for key, value in filters.items():
+                item_value = item.get(key)
+                if item_value is None:
+                    # If the item doesn't have the key, it's not a match.
+                    # This could be adapted based on desired behavior.
+                    matches_all = False
+                    break
+                
+                # Case-insensitive containment check
+                if value.lower() not in str(item_value).lower():
+                    matches_all = False
+                    break
+            
+            if matches_all:
+                filtered_items.append(item)
+        return filtered_items
     
     def _prompt_for_filters(self):
         """Prompt user for key-value filters."""
         console.print_newline()
-        console.print_info("Enter filters (e.g., key1=value1 key2=value2):")
+        if self.filter_keys:
+            keys = ", ".join(self.filter_keys)
+            console.print_info(f"Enter filters as key=value pairs (e.g., status=running type=RCA).")
+            console.print_info(f"Available keys: {keys}")
+        else:
+            console.print_info("Enter filters (e.g., key=value key2=value2):")
         filter_input = Prompt.ask("Filters")
         self.filters = self._parse_filters(filter_input)
 

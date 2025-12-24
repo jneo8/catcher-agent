@@ -1,4 +1,4 @@
-"""Implementation of the /end slash command."""
+"""Implementation of the /exit slash command."""
 from temporalio.client import Client as TemporalClient
 
 from ein_agent_cli import console
@@ -6,16 +6,16 @@ from ein_agent_cli.models import HumanInLoopConfig, SessionState
 from ein_agent_cli.slash_commands.base import CommandResult, SlashCommand
 
 
-class EndCommand(SlashCommand):
-    """Ends the current conversation and exits the CLI."""
+class ExitCommand(SlashCommand):
+    """Exits the CLI."""
 
     @property
     def name(self) -> str:
-        return "end"
+        return "exit"
 
     @property
     def description(self) -> str:
-        return "End the conversation and close the workflow"
+        return "Exit the CLI"
 
     async def execute(
         self, args: str, config: HumanInLoopConfig, client: TemporalClient, session: SessionState

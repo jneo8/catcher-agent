@@ -1,20 +1,20 @@
 """Implementation of the /switch slash command."""
-from prompt_toolkit import PromptSession
-from rich.table import Table
+from typing import Dict, List, Optional
+
 from temporalio.client import Client as TemporalClient
 
 from ein_agent_cli import console
+from ein_agent_cli.completer import WorkflowCompleter
 from ein_agent_cli.models import HumanInLoopConfig, SessionState
 from ein_agent_cli.slash_commands.base import (
     CommandResult,
     SlashCommand,
-    WorkflowCompleter,
 )
-from ein_agent_cli.temporal import get_workflow_status, list_workflows
+from ein_agent_cli.ui import InteractiveList
 
 
 class SwitchCommand(SlashCommand):
-    """Switch between connected workflows."""
+    """Switch to a workflow in the current context."""
 
     @property
     def name(self) -> str:
@@ -22,98 +22,101 @@ class SwitchCommand(SlashCommand):
 
     @property
     def description(self) -> str:
-        return "Switch between workflows (shows running workflows with dropdown)"
+        return "Switch to a workflow in the current context"
 
     async def execute(
         self, args: str, config: HumanInLoopConfig, client: TemporalClient, session: SessionState
     ) -> CommandResult:
-        # Get list of all workflows
-        workflows = await list_workflows(config.temporal)
-
-        if not workflows:
-            console.print_info("No workflows found.")
+        context = session.get_current_context()
+        if not context:
+            console.print_error("No active context.")
             return CommandResult()
 
-        # Display workflow table
-        console.print_info("Available workflows:")
-        console.print_newline()
-        table = Table(show_header=True, header_style="bold magenta")
-        table.add_column("Workflow ID", style="cyan")
-        table.add_column("Type", style="green")
-        table.add_column("Started", style="yellow")
-        table.add_column("Status", style="blue")
+        workflows = context.local_context.get_all_workflows()
+        if not workflows:
+            console.print_info("No workflows in local context to switch to.")
+            return CommandResult()
+        
+        # If an argument is provided, try to switch directly
+        if args:
+            item = self._workflow_finder(args, workflows)
+            if item:
+                return await self._switch_to_workflow(item, {"session": session})
+            else:
+                console.print_error(f"Workflow '{args}' not found in local context.")
+                return CommandResult()
 
-        for wf in workflows:
-            wf_id = wf.get("workflow_id", "N/A")
-            wf_type = wf.get("workflow_type", "N/A")
-            start_time = wf.get("start_time", "N/A")
-            status_marker = "[CURRENT]" if wf_id == session.current_workflow_id else ""
+        interactive_list = InteractiveList(
+            items=workflows,
+            item_name="workflow",
+            table_title="Switch to a Workflow",
+            column_definitions=[
+                {"header": "#", "style": "dim"},
+                {"header": "Workflow ID", "style": "cyan"},
+                {"header": "Type", "style": "green"},
+                {"header": "Alert", "style": "yellow"},
+                {"header": "Status", "style": "blue"},
+            ],
+            row_renderer=self._render_row,
+            completer_class=lambda items: WorkflowCompleter(
+                items, session.current_workflow_id
+            ),
+            default_action=self._switch_to_workflow,
+            finder=self._workflow_finder,
+            session_state={
+                "session": session,
+                "context": context,
+            },
+        )
+        result = await interactive_list.run()
+        return result or CommandResult()
 
-            table.add_row(
-                wf_id, wf_type, start_time, f"{wf.get('status', 'N/A')} {status_marker}"
+    def _workflow_finder(self, search_term: str, items: List[Dict]) -> Optional[Dict]:
+        try:
+            choice = int(search_term)
+            if 1 <= choice <= len(items):
+                return items[choice - 1]
+        except ValueError:
+            pass
+        
+        for item in items:
+            if search_term in item.get("workflow_id", ""):
+                return item
+        return None
+
+    def _render_row(self, idx: int, wf: Dict, session_state: Dict) -> List[str]:
+        context = session_state["context"]
+        workflow_id = wf.get("workflow_id", "")
+        workflow_type = wf.get("type", "")
+        status = wf.get("status", "")
+        alert_fingerprint = wf.get("alert_fingerprint")
+
+        alert_name = "-"
+        if alert_fingerprint:
+            alert_item = context.local_context.get_item(alert_fingerprint)
+            alert_name = (
+                alert_item.data.get("alertname", alert_fingerprint[:12] + "...")
+                if alert_item
+                else alert_fingerprint[:12] + "..."
             )
 
-        console.print_table(table)
-        console.print_newline()
-
-        # Create completer with workflow IDs
-        completer = WorkflowCompleter(workflows, session.current_workflow_id)
-        prompt_session = PromptSession(completer=completer)
-
-        # Determine default workflow ID
-        default_wf_id = (
-            session.current_workflow_id
-            if session.current_workflow_id
-            else workflows[0].get("workflow_id", "")
+        display_id = (
+            workflow_id if len(workflow_id) <= 30 else workflow_id[:27] + "..."
         )
+        return [str(idx), display_id, workflow_type, alert_name, status]
 
-        console.print_info("Type or use Tab to select a workflow ID:")
+    async def _switch_to_workflow(
+        self, wf: Dict, session_state: Dict
+    ) -> Optional[CommandResult]:
+        session = session_state["session"]
+        workflow_id = wf.get("workflow_id")
 
-        while True:
-            try:
-                selected_workflow_id = await prompt_session.prompt_async(
-                    "Select workflow: ", default=default_wf_id
-                )
+        if not workflow_id:
+            return CommandResult()
 
-                # Strip whitespace
-                selected_workflow_id = selected_workflow_id.strip()
-
-                if not selected_workflow_id:
-                    console.print_error("Workflow ID cannot be empty.")
-                    continue
-
-                # Check if workflow exists in list
-                workflow_exists = any(
-                    wf.get("workflow_id") == selected_workflow_id for wf in workflows
-                )
-                if not workflow_exists:
-                    console.print_error(
-                        f"Workflow '{selected_workflow_id}' not found in running workflows."
-                    )
-                    console.print_dim("Hint: Use Tab to see available workflows")
-                    continue
-
-                if selected_workflow_id == session.current_workflow_id:
-                    console.print_info("Already on this workflow.")
-                    return CommandResult()
-
-                # Verify the workflow is accessible
-                try:
-                    status = await get_workflow_status(client, selected_workflow_id)
-                    console.print_success(
-                        f"✓ Switched to workflow: {selected_workflow_id}"
-                    )
-                    console.print_dim(f"Current state: {status.state}")
-                    return CommandResult(
-                        should_switch=True, workflow_id=selected_workflow_id
-                    )
-                except Exception as e:
-                    console.print_error(f"Failed to switch to workflow: {e}")
-                    return CommandResult()
-
-            except KeyboardInterrupt:
-                console.print_warning("Selection cancelled.")
-                return CommandResult()
-            except EOFError:
-                console.print_warning("Selection cancelled.")
-                return CommandResult()
+        if workflow_id == session.current_workflow_id:
+            console.print_info(f"Re-entering workflow {workflow_id}...")
+        else:
+            console.print_success(f"✓ Switched to workflow: {workflow_id}")
+        
+        return CommandResult(should_switch=True, workflow_id=workflow_id)

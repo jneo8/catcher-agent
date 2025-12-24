@@ -1,16 +1,16 @@
 """Implementation of the /workflows slash command."""
 import json
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
-from rich.prompt import Prompt, IntPrompt
+from rich.prompt import Prompt
 from temporalio.client import Client as TemporalClient
 
 from ein_agent_cli import console
+from ein_agent_cli.completer import WorkflowCompleter
 from ein_agent_cli.models import HumanInLoopConfig, SessionState
 from ein_agent_cli.slash_commands.base import (
     CommandResult,
     SlashCommand,
-    WorkflowCompleter,
 )
 from ein_agent_cli.ui import InteractiveList
 
@@ -40,6 +40,21 @@ class WorkflowsCommand(SlashCommand):
             console.print_info("Use /alerts to start RCA workflows for your alerts.")
             return CommandResult()
 
+        def _workflow_finder(search_term: str, items: List[Dict]) -> Optional[Dict]:
+            try:
+                choice = int(search_term)
+                if 1 <= choice <= len(items):
+                    return items[choice - 1]
+            except ValueError:
+                pass
+            
+            for item in items:
+                if search_term in item.get("workflow_id", ""):
+                    return item
+            return None
+        
+        filter_keys = ["id", "type", "status", "fingerprint", "alert"]
+        
         interactive_list = InteractiveList(
             items=workflows,
             item_name="workflow",
@@ -49,6 +64,7 @@ class WorkflowsCommand(SlashCommand):
                 {"header": "Workflow ID", "style": "cyan"},
                 {"header": "Type", "style": "green"},
                 {"header": "Alert", "style": "yellow"},
+                {"header": "Fingerprint", "style": "dim"},
                 {"header": "Status", "style": "blue"},
             ],
             row_renderer=self._render_row,
@@ -67,9 +83,49 @@ class WorkflowsCommand(SlashCommand):
                 "client": client,
                 "context": context,
             },
+            finder=_workflow_finder,
+            filter_keys=filter_keys,
+            filter_logic=self._filter_workflows,
         )
         result = await interactive_list.run()
         return result or CommandResult()
+
+    def _filter_workflows(self, items: List[Dict], filters: Dict[str, str]) -> List[Dict]:
+        filtered_items = []
+        context = self.session_state["context"]
+
+        key_map = {
+            "id": "workflow_id",
+            "type": "type",
+            "status": "status",
+            "fingerprint": "alert_fingerprint",
+        }
+
+        for item in items:
+            matches_all = True
+            for key, value in filters.items():
+                value_lower = value.lower()
+                
+                if key in key_map:
+                    item_value = item.get(key_map[key], "")
+                    if value_lower not in str(item_value).lower():
+                        matches_all = False
+                        break
+                
+                elif key == "alert":
+                    alert_fingerprint = item.get("alert_fingerprint")
+                    if not alert_fingerprint:
+                        matches_all = False
+                        break
+                    alert_item = context.local_context.get_item(alert_fingerprint)
+                    if not alert_item or value_lower not in alert_item.data.get("alertname", "").lower():
+                        matches_all = False
+                        break
+            
+            if matches_all:
+                filtered_items.append(item)
+        return filtered_items
+
 
     def _render_row(self, idx: int, wf: Dict, session_state: Dict) -> List[str]:
         context = session_state["context"]
@@ -81,16 +137,15 @@ class WorkflowsCommand(SlashCommand):
         alert_name = "-"
         if alert_fingerprint:
             alert_item = context.local_context.get_item(alert_fingerprint)
-            alert_name = (
-                alert_item.data.get("alertname", alert_fingerprint[:12] + "...")
-                if alert_item
-                else alert_fingerprint[:12] + "..."
-            )
+            if alert_item:
+                alert_name = alert_item.data.get("alertname", "-")
 
+        fingerprint_display = alert_fingerprint[:12] + "..." if alert_fingerprint else "-"
+        
         display_id = (
             workflow_id if len(workflow_id) <= 30 else workflow_id[:27] + "..."
         )
-        return [str(idx), display_id, workflow_type, alert_name, status]
+        return [str(idx), display_id, workflow_type, alert_name, fingerprint_display, status]
 
     async def _view_result(self, wf: Dict, session_state: Dict) -> Optional[CommandResult]:
         result = wf.get("result")
