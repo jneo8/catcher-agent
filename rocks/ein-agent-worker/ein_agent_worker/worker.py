@@ -10,8 +10,7 @@ from temporalio.worker import Worker
 
 from agents.extensions.models.litellm_provider import LitellmProvider
 from ein_agent_worker.mcp_providers import MCPConfig, MCPProviderRegistry
-from ein_agent_worker.workflows.single_alert_investigation import SingleAlertInvestigationWorkflow
-from ein_agent_worker.workflows.incident_correlation import (
+from ein_agent_worker.workflows import (
     IncidentCorrelationWorkflow,
     InitialRcaWorkflow,
     CorrectiveRcaWorkflow,
@@ -62,7 +61,6 @@ async def main():
         client,
         task_queue=queue,
         workflows=[
-            SingleAlertInvestigationWorkflow,
             IncidentCorrelationWorkflow,
             InitialRcaWorkflow,
             CorrectiveRcaWorkflow,
