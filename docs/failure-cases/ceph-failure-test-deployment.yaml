@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ceph-failure-test-pvc
+  namespace: failure-cases
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: ceph-xfs
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ceph-failure-test
+  namespace: failure-cases
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ceph-failure-test
+  template:
+    metadata:
+      labels:
+        app: ceph-failure-test
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: test-node
+                operator: In
+                values:
+                - "true"
+              - key: failure-node
+                operator: NotIn
+                values:
+                - "true"
+      containers:
+      - name: nginx
+        image: nginx:latest
+        volumeMounts:
+        - name: storage
+          mountPath: /data
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: ceph-failure-test-pvc
