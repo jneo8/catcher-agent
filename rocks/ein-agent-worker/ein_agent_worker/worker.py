@@ -10,12 +10,6 @@ from temporalio.worker import Worker
 
 from agents.extensions.models.litellm_provider import LitellmProvider
 from ein_agent_worker.mcp_providers import MCPConfig, MCPProviderRegistry, load_mcp_config
-from ein_agent_worker.workflows.single_alert_investigation import SingleAlertInvestigationWorkflow
-from ein_agent_worker.workflows.incident_correlation import (
-    IncidentCorrelationWorkflow,
-    InitialRcaWorkflow,
-    CorrectiveRcaWorkflow,
-)
 from ein_agent_worker.workflows.multi_agent_correlation import MultiAgentCorrelationWorkflow
 # Note: No activities needed - agent orchestration happens in workflows now
 # MCP operations are handled by the OpenAIAgentsPlugin via stateless_mcp_server()
@@ -67,10 +61,6 @@ async def main():
         client,
         task_queue=queue,
         workflows=[
-            SingleAlertInvestigationWorkflow,
-            IncidentCorrelationWorkflow,
-            InitialRcaWorkflow,
-            CorrectiveRcaWorkflow,
             MultiAgentCorrelationWorkflow,  # Multi-agent workflow with durable orchestration
         ],
         activities=[load_mcp_config],  # Registered load_mcp_config
