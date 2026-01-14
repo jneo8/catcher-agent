@@ -1,9 +1,7 @@
-"""Data models for multi-agent investigation."""
+"""Data models for investigation."""
 
-from .investigation import AlertFindings, MultiRoundConfig, ContextAgentState
+from .investigation import InvestigationConfig
 
 __all__ = [
-    "AlertFindings",
-    "MultiRoundConfig",
-    "ContextAgentState",
+    "InvestigationConfig",
 ]

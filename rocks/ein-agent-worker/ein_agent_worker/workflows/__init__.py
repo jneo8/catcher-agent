@@ -1,7 +1,7 @@
 """Temporal workflows for Ein Agent Worker."""
 
-from .multi_agent_correlation import MultiAgentCorrelationWorkflow
+from .incident_correlation_workflow import IncidentCorrelationWorkflow
 
 __all__ = [
-    "MultiAgentCorrelationWorkflow",
+    "IncidentCorrelationWorkflow",
 ]

@@ -1,4 +1,4 @@
-"""Utility functions for multi-agent investigation workflows."""
+"""Utility functions for workflows."""
 
 from typing import Any, Dict, List
 

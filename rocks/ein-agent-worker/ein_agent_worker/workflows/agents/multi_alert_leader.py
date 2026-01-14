@@ -23,7 +23,6 @@ Your FINAL message must be a structured incident report in Markdown:
 - **Root Cause Analysis**
 - **Affected Alerts and Relationships**
 - **Cascade Chains**
-- **Confidence Assessment**
 - **Recommendations**
 
 Do NOT call any more tools once you have provided the final report. Simply output the text of the report as your final turn.

@@ -11,7 +11,7 @@ from ein_agent_cli.models import TemporalWorkflowParams
 
 
 async def trigger_incident_workflow(params: TemporalWorkflowParams) -> str:
-    """Trigger MultiAgentCorrelationWorkflow in Temporal.
+    """Trigger IncidentCorrelationWorkflow in Temporal.
 
     Args:
         params: Temporal workflow parameters
@@ -44,7 +44,7 @@ async def trigger_incident_workflow(params: TemporalWorkflowParams) -> str:
     try:
         # Start workflow
         handle = await client.start_workflow(
-            "MultiAgentCorrelationWorkflow",
+            "IncidentCorrelationWorkflow",
             workflow_alerts,
             id=workflow_id,
             task_queue=params.config.queue,

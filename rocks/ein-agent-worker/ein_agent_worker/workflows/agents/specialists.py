@@ -1,6 +1,19 @@
 from agents import Agent
 from temporalio.contrib import openai_agents
 
+DEFAULT_DOMAIN_DESCRIPTIONS = {
+    "kubernetes": "Kubernetes container orchestration platform, including pods, deployments, services, and node-level infrastructure",
+    "ceph": "Ceph distributed storage system, including OSDs, monitors, managers, and CSI drivers for block and file storage",
+    "grafana": "Grafana observability stack, including dashboards, data sources, and integrated telemetry like Prometheus and Loki",
+}
+
+def get_domain_description(server_name: str) -> str:
+    """Get the hard-coded domain description for a specialist."""
+    return DEFAULT_DOMAIN_DESCRIPTIONS.get(
+        server_name.lower(), 
+        f"{server_name} infrastructure"
+    )
+
 def create_specialist_instructions(domain_description: str) -> str:
     """Generate specialist instructions based on domain description."""
     return f"""You are a {domain_description} troubleshooting expert.
@@ -30,7 +43,6 @@ Provide a concise summary including:
 - Investigation summary: What you investigated
 - Key findings: What you discovered
 - Root cause assessment: Is the issue in your domain? (Yes/No/Uncertain)
-- Confidence: Your confidence level (0.0-1.0)
 - Recommendations: Next steps or remediation actions
 """
 
