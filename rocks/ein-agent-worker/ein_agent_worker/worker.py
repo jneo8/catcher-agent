@@ -9,13 +9,16 @@ from temporalio.common import RetryPolicy
 from temporalio.worker import Worker
 
 from agents.extensions.models.litellm_provider import LitellmProvider
-from ein_agent_worker.mcp_providers import MCPConfig, MCPProviderRegistry
+from ein_agent_worker.mcp_providers import MCPConfig, MCPProviderRegistry, load_mcp_config
 from ein_agent_worker.workflows.single_alert_investigation import SingleAlertInvestigationWorkflow
 from ein_agent_worker.workflows.incident_correlation import (
     IncidentCorrelationWorkflow,
     InitialRcaWorkflow,
     CorrectiveRcaWorkflow,
 )
+from ein_agent_worker.workflows.multi_agent_correlation import MultiAgentCorrelationWorkflow
+# Note: No activities needed - agent orchestration happens in workflows now
+# MCP operations are handled by the OpenAIAgentsPlugin via stateless_mcp_server()
 from temporalio.contrib.openai_agents import OpenAIAgentsPlugin, ModelActivityParameters
 
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +33,7 @@ async def main():
     queue = os.getenv("TEMPORAL_QUEUE", "ein-agent-queue")
 
     # Load MCP configuration from environment
-    mcp_config = MCPConfig()
+    mcp_config = MCPConfig.from_env()
 
     # Get all registered MCP server providers
     mcp_providers = MCPProviderRegistry.get_all_providers(mcp_config)
@@ -58,6 +61,8 @@ async def main():
     )
 
     # Create worker
+    # Note: No custom activities needed - agent orchestration happens in workflows
+    # MCP operations are handled automatically by OpenAIAgentsPlugin
     worker = Worker(
         client,
         task_queue=queue,
@@ -66,7 +71,9 @@ async def main():
             IncidentCorrelationWorkflow,
             InitialRcaWorkflow,
             CorrectiveRcaWorkflow,
+            MultiAgentCorrelationWorkflow,  # Multi-agent workflow with durable orchestration
         ],
+        activities=[load_mcp_config],  # Registered load_mcp_config
     )
 
     logger.info("Worker started successfully on queue: %s", queue)

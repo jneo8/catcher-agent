@@ -22,10 +22,11 @@ Example:
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 from agents.mcp import MCPServerStreamableHttp, MCPServerSse, create_static_tool_filter
+from temporalio import activity
 from temporalio.contrib.openai_agents import StatelessMCPServerProvider
 
 logger = logging.getLogger(__name__)
@@ -50,39 +51,42 @@ class MCPServerConfig:
     transport: str = "http"
 
 
+@dataclass
 class MCPConfig:
     """Global MCP configuration loaded from environment variables.
 
     This object is created once and can be passed to workers and workflows.
     """
+    
+    servers: List[MCPServerConfig] = field(default_factory=list)
 
-    def __init__(self):
-        """Initialize MCP configuration from environment."""
-        self.servers: List[MCPServerConfig] = []
-        self._load_from_env()
-
-    def _load_from_env(self) -> None:
-        """Load MCP server configurations from environment variables."""
+    @classmethod
+    def from_env(cls) -> "MCPConfig":
+        """Load MCP configuration from environment variables."""
+        config = cls()
         servers_config = os.getenv("MCP_SERVERS", "")
         if not servers_config:
             logger.info("MCP_SERVERS not set, no MCP servers configured")
-            return
+            return config
 
         server_names = [name.strip() for name in servers_config.split(",") if name.strip()]
 
         if not server_names:
             logger.warning("MCP_SERVERS is empty")
-            return
+            return config
 
         logger.info("Loading configuration for %d MCP server(s): %s", len(server_names), ", ".join(server_names))
 
         for server_name in server_names:
-            config = self._load_server_config(server_name)
-            if config:
-                self.servers.append(config)
-                logger.info("Loaded MCP server config: %s (enabled=%s)", server_name, config.enabled)
+            server_config = cls._load_server_config(server_name)
+            if server_config:
+                config.servers.append(server_config)
+                logger.info("Loaded MCP server config: %s (enabled=%s)", server_name, server_config.enabled)
+        
+        return config
 
-    def _load_server_config(self, server_name: str) -> Optional[MCPServerConfig]:
+    @staticmethod
+    def _load_server_config(server_name: str) -> Optional[MCPServerConfig]:
         """Load configuration for a single MCP server."""
         server_key = server_name.upper().replace("-", "_")
 
@@ -139,6 +143,13 @@ class MCPConfig:
             if server.name.lower() == name.lower():
                 return server
         return None
+
+
+@activity.defn
+async def load_mcp_config() -> MCPConfig:
+    """Activity to load MCP configuration from environment variables."""
+    return MCPConfig.from_env()
+
 
 
 class MCPProviderRegistry:
