@@ -108,7 +108,8 @@ This is a single-round investigation with Router assistance.
             agents[name] = agent
 
         # 2. Router Agent
-        router = new_router_agent(self.model)
+        available_specialist_names = list(specialists.keys())
+        router = new_router_agent(self.model, available_specialist_names)
         agents["RouterAgent"] = router
 
         # 3. Leaders

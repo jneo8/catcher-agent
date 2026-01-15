@@ -4,7 +4,7 @@ This agent acts as a deterministic directory service. It analyzes text and
 maps keywords to specific specialist agents using a hard-coded ruleset.
 """
 
-from typing import Dict, Set
+from typing import Dict, Set, List
 from agents import Agent, function_tool
 
 # Mapping of Specialist Agent names to their trigger keywords.
@@ -46,44 +46,60 @@ You have a hard-coded internal mapping of keywords to specialists.
 2. CephSpecialist (matched keyword 'rbd')"
 """
 
-@function_tool
-def suggest_specialists_tool(context: str) -> str:
-    """Analyze context text and return suggested specialists based on keywords.
+def new_router_agent(model: str, available_specialists: List[str]) -> Agent:
+    """Create a new Router Agent with awareness of available specialists.
     
     Args:
-        context: The text to analyze (alert description, logs, etc.)
+        model: The LLM model to use.
+        available_specialists: List of names of registered specialist agents.
     """
-    context_lower = context.lower()
-    suggestions = {} # Map name -> reason
     
-    # Always include Kubernetes as baseline for any infrastructure alert
-    if "KubernetesSpecialist" not in suggestions:
-        suggestions["KubernetesSpecialist"] = "Baseline for infrastructure alerts"
-    
-    for specialist, keywords in KEYWORD_MAPPINGS.items():
-        matched_keywords = []
-        for keyword in keywords:
-            # Simple substring match. Could be improved with regex word boundaries if needed.
-            if keyword in context_lower:
-                matched_keywords.append(keyword)
-        
-        if matched_keywords:
-            reason = f"Matched keywords: {', '.join(matched_keywords)}"
-            if specialist in suggestions:
-                # If already added (e.g. K8s baseline), append reason
-                suggestions[specialist] += f"; {reason}"
-            else:
-                suggestions[specialist] = reason
-    
-    # Format output
-    output = ["Suggested Specialists:"]
-    for name, reason in suggestions.items():
-        output.append(f"- {name}: {reason}")
-        
-    return "\n".join(output)
+    # Normalize available specialists for case-insensitive matching
+    available_set = {s.lower() for s in available_specialists}
 
-def new_router_agent(model: str) -> Agent:
-    """Create a new Router Agent."""
+    @function_tool
+    def suggest_specialists_tool(context: str) -> str:
+        """Analyze context text and return suggested specialists based on keywords.
+        
+        Args:
+            context: The text to analyze (alert description, logs, etc.)
+        """
+        context_lower = context.lower()
+        suggestions = {} # Map name -> reason
+        
+        # Always include Kubernetes as baseline IF it is available
+        if "kubernetesspecialist" in available_set:
+            suggestions["KubernetesSpecialist"] = "Baseline for infrastructure alerts"
+        
+        for specialist_name, keywords in KEYWORD_MAPPINGS.items():
+            # SKIP specialists that are not enabled/available
+            if specialist_name.lower() not in available_set:
+                continue
+
+            matched_keywords = []
+            for keyword in keywords:
+                # Simple substring match
+                if keyword in context_lower:
+                    matched_keywords.append(keyword)
+            
+            if matched_keywords:
+                reason = f"Matched keywords: {', '.join(matched_keywords)}"
+                if specialist_name in suggestions:
+                    # If already added (e.g. K8s baseline), append reason
+                    suggestions[specialist_name] += f"; {reason}"
+                else:
+                    suggestions[specialist_name] = reason
+        
+        # Format output
+        if not suggestions:
+            return "No specific specialists matched the keywords. Suggest manual investigation."
+
+        output = ["Suggested Specialists:"]
+        for name, reason in suggestions.items():
+            output.append(f"- {name}: {reason}")
+            
+        return "\n".join(output)
+
     return Agent(
         name="RouterAgent",
         instructions=ROUTER_INSTRUCTIONS,

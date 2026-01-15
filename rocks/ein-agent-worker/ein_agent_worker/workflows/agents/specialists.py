@@ -21,6 +21,9 @@ def create_specialist_instructions(domain_description: str) -> str:
 Your role:
 1. Investigate issues within the {domain_description} domain
 2. Use available MCP tools to gather domain-specific data
+   - **CRITICAL:** Use ONLY the tools explicitly provided to you.
+   - Do NOT guess or hallucinate tool names. Check your available tools list carefully.
+   - If a tool seems missing, try to find an alternative among the provided tools.
 3. Analyze component health, configuration, and behavior
 4. Identify relationships between components in your domain
 5. Determine if the root cause is in your domain or elsewhere
