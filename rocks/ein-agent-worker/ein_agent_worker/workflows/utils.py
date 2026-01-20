@@ -22,6 +22,49 @@ def format_alert_list(alerts: List[Dict[str, Any]]) -> str:
     return "\n\n".join(alert_summaries)
 
 
+def format_single_alert(alert: Dict[str, Any], index: int = 1) -> str:
+    """Format a single alert for embedding in an investigator's context.
+
+    This provides a complete, self-contained alert description that an
+    investigator can use without needing additional context.
+
+    Args:
+        alert: Alert dictionary from Alertmanager
+        index: Alert index number
+
+    Returns:
+        Formatted alert string with all relevant details
+    """
+    labels = alert.get("labels", {})
+    annotations = alert.get("annotations", {})
+
+    lines = [
+        f"**Alert #{index}**",
+        f"- **Name:** {labels.get('alertname', 'Unknown')}",
+        f"- **Fingerprint:** {alert.get('fingerprint', 'N/A')}",
+        f"- **Status:** {alert.get('status', 'N/A')}",
+        f"- **Severity:** {labels.get('severity', 'N/A')}",
+        f"- **Started:** {alert.get('startsAt', alert.get('starts_at', 'N/A'))}",
+    ]
+
+    # Add all resource labels
+    resource_keys = [
+        "node", "namespace", "pod", "deployment", "statefulset",
+        "daemonset", "job", "instance", "service", "container"
+    ]
+    for key in resource_keys:
+        if labels.get(key):
+            lines.append(f"- **{key.capitalize()}:** {labels[key]}")
+
+    # Add annotations
+    if annotations.get('summary'):
+        lines.append(f"- **Summary:** {annotations['summary']}")
+    if annotations.get('description'):
+        lines.append(f"- **Description:** {annotations['description']}")
+
+    return "\n".join(lines)
+
+
 def format_alert_summary(alert: Dict[str, Any]) -> str:
     """Format an alert into a human-readable summary.
 
