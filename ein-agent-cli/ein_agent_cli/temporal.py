@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+import temporalio.common
 from temporalio.client import Client as TemporalClient
 
 from ein_agent_cli import console
@@ -21,12 +22,12 @@ async def trigger_incident_workflow(params: TemporalWorkflowParams) -> str:
     Raises:
         Exception: If workflow trigger fails
     """
-    console.print_dim(f"Connecting to Temporal: {params.config.host}, namespace={params.config.namespace}")
-
     client = await TemporalClient.connect(
         params.config.host,
-        namespace=params.config.namespace,
+        namespace=params.config.namespace
     )
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
     # Convert alerts to workflow format
     workflow_alerts = [convert_alertmanager_alert(alert) for alert in params.alerts]
@@ -34,21 +35,24 @@ async def trigger_incident_workflow(params: TemporalWorkflowParams) -> str:
     # Generate workflow ID if not provided
     workflow_id = params.workflow_id
     if not workflow_id:
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        # Use a meaningful ID prefix
         workflow_id = f"incident-correlation-{timestamp}"
 
     console.print_info(f"Starting workflow: {workflow_id}")
     console.print_dim(f"Alerts: {len(workflow_alerts)}")
-    console.print_dim(f"MCP servers: {params.mcp_servers}")
 
-    # Start workflow
-    handle = await client.start_workflow(
-        "IncidentCorrelationWorkflow",
-        workflow_alerts,
-        id=workflow_id,
-        task_queue=params.config.queue,
-        memo={"mcp_servers": params.mcp_servers},
-    )
+    try:
+        # Start workflow
+        handle = await client.start_workflow(
+            "IncidentCorrelationWorkflow",
+            workflow_alerts,
+            id=workflow_id,
+            task_queue=params.config.queue,
+            id_reuse_policy=temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+        )
+    except Exception as e:
+        console.print_error(f"Failed to start workflow: {e}")
+        raise
 
     console.print_success(f"✓ Workflow started: {workflow_id}")
     return workflow_id

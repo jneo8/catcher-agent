@@ -6,7 +6,8 @@ from typing import List, Optional
 import typer
 
 from ein_agent_cli import orchestrator
-from ein_agent_cli.models import WorkflowConfig
+from ein_agent_cli.hitl_orchestrator import run_hitl_workflow
+from ein_agent_cli.models import WorkflowConfig, HITLWorkflowConfig
 
 app = typer.Typer(help="Ein Agent CLI - Incident investigation and correlation")
 
@@ -135,3 +136,88 @@ def run_incident_workflow(
 
     # Run orchestrator with validated configuration
     asyncio.run(orchestrator.run_incident_workflow(config))
+
+
+@app.command()
+def investigate(
+    temporal_host: Optional[str] = typer.Option(
+        None,
+        "--temporal-host",
+        help="Temporal server host:port",
+    ),
+    temporal_namespace: Optional[str] = typer.Option(
+        None,
+        "--temporal-namespace",
+        help="Temporal namespace",
+    ),
+    temporal_queue: Optional[str] = typer.Option(
+        None,
+        "--temporal-queue",
+        help="Temporal task queue",
+    ),
+    workflow_id: Optional[str] = typer.Option(
+        None,
+        "--workflow-id",
+        help="Custom workflow ID",
+    ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="LLM model to use (e.g., gemini/gemini-2.5-flash)",
+    ),
+    alertmanager_url: Optional[str] = typer.Option(
+        None,
+        "--alertmanager-url",
+        "-a",
+        help="Alertmanager URL for fetching alerts",
+    ),
+    max_turns: int = typer.Option(
+        50,
+        "--max-turns",
+        help="Maximum agent turns before stopping",
+    ),
+):
+    """Start an interactive investigation session.
+
+    This command starts a conversational investigation workflow where you can:
+    - Chat with an AI investigation agent
+    - Ask the agent to fetch and investigate alerts
+    - Provide context and guidance as the investigation progresses
+    - Get root cause analysis and remediation suggestions
+
+    The agent has access to:
+    - Alertmanager for fetching alerts
+    - Domain specialists (Compute, Storage, Network) for deep technical analysis
+    - MCP tools (Kubernetes, Grafana, etc.) for infrastructure queries
+
+    Examples:
+
+      # Start interactive investigation with default settings
+      ein-agent-cli investigate
+
+      # Use a specific model
+      ein-agent-cli investigate -m gemini/gemini-2.0-flash
+
+      # Connect to specific Temporal instance
+      ein-agent-cli investigate --temporal-host localhost:7233
+
+      # With Alertmanager integration
+      ein-agent-cli investigate -a http://alertmanager:9093
+
+    Interactive Commands:
+      /quit, /exit, /q  - End the conversation
+      /status           - Show workflow status
+      /history          - Show conversation history
+    """
+    config = HITLWorkflowConfig.from_cli_args(
+        temporal_host=temporal_host,
+        temporal_namespace=temporal_namespace,
+        temporal_queue=temporal_queue,
+        workflow_id=workflow_id,
+        model=model,
+        alertmanager_url=alertmanager_url,
+        max_turns=max_turns,
+    )
+
+    asyncio.run(run_hitl_workflow(config))

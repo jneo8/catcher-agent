@@ -12,6 +12,35 @@
 
 Follow the instruction on official document to deploy cos-lite: https://charmhub.io/cos-lite.
 
+### Configuring Storage for COS-lite Components
+
+To require more storage for Prometheus, Loki, and Alertmanager, you can use an overlay file during deployment. Create a `cos-storage-overlay.yaml` file with the desired storage configurations:
+
+```yaml
+bundle: kubernetes
+applications:
+  prometheus:
+    storage:
+      database: 10G
+  loki:
+    storage:
+      # This stores the index (metadata)
+      active-index-directory: 2G
+      # This stores the actual log data (chunks)
+      loki-chunks: 10G
+  alertmanager:
+    storage:
+      data: 2G
+```
+
+Then, deploy `cos-lite` using the overlay file:
+
+```bash
+juju deploy cos-lite --trust --overlay @./cos-storage-overlay.yaml
+```
+
+This will deploy `cos-lite` with the specified storage requirements for its components.
+
 ## Deploy Temporal Server
 
 Before deploying the worker, you need a Temporal server running. You can deploy it using Juju.

@@ -346,3 +346,65 @@ class TemporalWorkflowParams(BaseModel):
         default=None,
         description="Custom workflow ID"
     )
+
+
+# =============================================================================
+# Human-in-the-Loop Configuration
+# =============================================================================
+
+class HITLWorkflowConfig(BaseModel):
+    """Configuration for human-in-the-loop investigation workflow."""
+
+    temporal: TemporalConfig = Field(
+        default_factory=TemporalConfig,
+        description="Temporal configuration"
+    )
+    workflow_id: Optional[str] = Field(
+        default=None,
+        description="Custom workflow ID"
+    )
+    model: str = Field(
+        default="gemini/gemini-2.5-flash",
+        description="LLM model to use"
+    )
+    alertmanager_url: Optional[str] = Field(
+        default=None,
+        description="Alertmanager URL for fetching alerts"
+    )
+    max_turns: int = Field(
+        default=50,
+        ge=1,
+        description="Maximum agent turns"
+    )
+
+    @classmethod
+    def from_cli_args(
+        cls,
+        temporal_host: Optional[str],
+        temporal_namespace: Optional[str],
+        temporal_queue: Optional[str],
+        workflow_id: Optional[str],
+        model: Optional[str],
+        alertmanager_url: Optional[str],
+        max_turns: int,
+    ) -> "HITLWorkflowConfig":
+        """Create config from CLI arguments."""
+        temporal_config = TemporalConfig()
+        if temporal_host is not None:
+            temporal_config.host = temporal_host
+        if temporal_namespace is not None:
+            temporal_config.namespace = temporal_namespace
+        if temporal_queue is not None:
+            temporal_config.queue = temporal_queue
+
+        config = cls(
+            temporal=temporal_config,
+            workflow_id=workflow_id,
+            max_turns=max_turns,
+        )
+        if model is not None:
+            config.model = model
+        if alertmanager_url is not None:
+            config.alertmanager_url = alertmanager_url
+
+        return config
