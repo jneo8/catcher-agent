@@ -85,11 +85,10 @@ class IncidentCorrelationWorkflow:
         investigators = [agent for name, agent in agents.items() if name.startswith("Investigator_")]
         
         workflow.logger.info(f"Phase 1: Running {len(investigators)} investigators in parallel...")
-        investigator_tasks = [
-            asyncio.create_task(self._perform_initial_alert_investigation(agent)) 
+        initial_investigation_reports = await asyncio.gather(*[
+            self._perform_initial_alert_investigation(agent)
             for agent in investigators
-        ]
-        initial_investigation_reports = await asyncio.gather(*investigator_tasks)
+        ])
         
         results_text = "\n\n".join(initial_investigation_reports)
         alert_summary = format_alert_list(alerts)

@@ -9,9 +9,7 @@ A simple conversational workflow where:
 """
 
 from datetime import timedelta
-from typing import Any
 
-from pydantic import BaseModel, Field
 from agents import Agent, Runner, RunConfig, function_tool
 from agents.extensions.models.litellm_provider import LitellmProvider
 from temporalio import workflow
@@ -23,26 +21,16 @@ from ein_agent_worker.models import (
     ChatMessage,
     WorkflowState,
     HITLConfig,
-    AgentSelectionRequest,
+    WorkflowEvent,
+    WorkflowEventType,
 )
 from ein_agent_worker.workflows.agents.specialists import (
     DomainType,
     new_specialist_agent,
 )
-from ein_agent_worker.workflows.agents.single_alert_investigator import (
-    new_single_alert_investigator_agent,
-)
 from ein_agent_worker.workflows.agents.shared_context_tools import (
     create_shared_context_tools,
 )
-from agents.handoffs import handoff
-
-
-class InvestigateAlertInput(BaseModel):
-    """Input for starting investigation on a specific alert."""
-    fingerprint: str = Field(description="The fingerprint of the alert to investigate")
-    reason: str = Field(description="The reason for investigating this alert")
-
 
 # =============================================================================
 # Investigation Agent Prompt
@@ -51,28 +39,29 @@ INVESTIGATION_AGENT_PROMPT = """You are the Investigation Assistant (The Orchest
 
 ## Your Capabilities
 - **Fetch Alerts**: Use `fetch_alerts` to get current firing alerts.
-- **Delegate Alert Investigation**: When a specific alert needs deep investigation, use the `investigate_alert` tool to hand off to a specialized investigator for that alert.
-- **Consult Domain Specialists**: Use `select_specialist` to consult a domain specialist:
+- **Consult Domain Specialists**: You can hand off to domain specialists for deep analysis:
   - **ComputeSpecialist**: For Kubernetes, pods, nodes, and containers.
   - **StorageSpecialist**: For Ceph, OSDs, PVCs, and storage volumes.
   - **NetworkSpecialist**: For networking, DNS, load balancers, and ingress.
-- **Ask User**: Ask for clarification using `ask_user`.
-- **Print Findings Report**: Use `print_findings_report` to generate a formatted summary of all investigation findings. Use this when you want to present a comprehensive report to the user.
+- **Shared Context**: Use `get_shared_context`, `update_shared_context`, and `group_findings` to manage investigation findings.
+- **Ask User**: Ask for clarification or provide updates using `ask_user`.
+- **Print Findings Report**: Use `print_findings_report` to generate a formatted summary of all investigation findings.
 
 ## Your Workflow
 1. **Analyze User Request**: Determine if the user wants to investigate a specific alert or has a general infrastructure question.
-2. **Consult Specialists**: When you need domain expertise, call `select_specialist`:
-   - Provide your suggested specialist and the reason.
-   - The user will see all available options and can choose a different specialist.
-   - The tool will directly consult the specialist and return their findings.
-   - Example: `select_specialist(suggested="StorageSpecialist", reason="Alert involves Ceph storage")`
-3. **Synthesize**: Use the specialist's findings to provide a clear summary to the user.
-4. **Report**: When the investigation is complete, use `print_findings_report` to generate a well-structured summary of all findings.
+2. **Propose Specialist**: If you need domain expertise, suggest the appropriate specialist to the user and ask for confirmation.
+   - Example: "I see a Ceph issue. Shall I consult the Storage Specialist?"
+3. **Handoff**: Once the user confirms, use the appropriate handoff tool (e.g., `transfer_to_storagespecialist`).
+   - The specialist will investigate and then hand back to you with their findings.
+4. **Synthesize & Group**: As findings accumulate, use `group_findings` to consolidate related findings.
+5. **Report**: Use `print_findings_report` to show the current status.
+6. **Ongoing Support**: You are an always-on assistant. Do not close the session unless the user explicitly asks to stop.
 
 ## CRITICAL RULES
-- Use `select_specialist` to consult domain specialists. It returns the specialist's findings directly.
-- You do NOT have direct access to MCP tools. You must delegate to specialists who do.
-- Use `print_findings_report` to generate final reports for the user when wrapping up an investigation.
+- **ASK FIRST**: Do NOT hand off to a specialist without asking the user first.
+- **HANDOFFS**: Use the standard transfer tools to delegate (e.g., `transfer_to_computespecialist`).
+- **NO DIRECT MCP**: You do not have direct access to MCP tools. Delegate to specialists.
+- **OUTPUTTING REPORTS**: Always output the content of `print_findings_report` to the user.
 """
 
 
@@ -89,14 +78,8 @@ class HumanInTheLoopWorkflow:
         self._config = HITLConfig()
         self._mcp_config: MCPConfig | None = None
         self._run_config: RunConfig | None = None
-        self._pending_user_response: str | None = None
-        self._has_pending_input = False
+        self._event_queue: list[WorkflowEvent] = []
         self._should_end = False
-        self._pending_confirmation = False
-        self._confirmation_response: bool | None = None
-        # Agent selection state
-        self._pending_agent_selection = False
-        self._selected_agent: str | None = None
 
     # =========================================================================
     # Signals (user sends messages)
@@ -109,22 +92,37 @@ class HumanInTheLoopWorkflow:
         self._state.messages.append(
             ChatMessage(role="user", content=message, timestamp=workflow.now())
         )
-        self._pending_user_response = message
-        self._has_pending_input = True
+        self._event_queue.append(
+            WorkflowEvent(
+                type=WorkflowEventType.MESSAGE,
+                payload=message,
+                timestamp=workflow.now()
+            )
+        )
 
     @workflow.signal
     async def end_workflow(self) -> None:
         """User wants to end the conversation."""
         workflow.logger.info("End workflow signal received")
         self._should_end = True
-        self._has_pending_input = True  # Unblock if waiting
+        self._event_queue.append(
+            WorkflowEvent(
+                type=WorkflowEventType.STOP,
+                timestamp=workflow.now()
+            )
+        )
 
     @workflow.signal
     async def provide_confirmation(self, confirmed: bool) -> None:
         """User provides confirmation for a pending action."""
         workflow.logger.info(f"Received confirmation: {confirmed}")
-        self._confirmation_response = confirmed
-        self._pending_confirmation = False
+        self._event_queue.append(
+            WorkflowEvent(
+                type=WorkflowEventType.CONFIRMATION,
+                payload=confirmed,
+                timestamp=workflow.now()
+            )
+        )
 
     @workflow.signal
     async def provide_agent_selection(self, selected_agent: str) -> None:
@@ -134,8 +132,13 @@ class HumanInTheLoopWorkflow:
             selected_agent: Name of the selected agent, or empty string to cancel.
         """
         workflow.logger.info(f"Received agent selection: {selected_agent}")
-        self._selected_agent = selected_agent if selected_agent else None
-        self._pending_agent_selection = False
+        self._event_queue.append(
+            WorkflowEvent(
+                type=WorkflowEventType.SELECTION,
+                payload=selected_agent if selected_agent else None,
+                timestamp=workflow.now()
+            )
+        )
 
     # =========================================================================
     # Queries (read state)
@@ -155,6 +158,23 @@ class HumanInTheLoopWorkflow:
     def get_status(self) -> str:
         """Get current workflow status."""
         return self._state.status.value
+
+    # =========================================================================
+    # Event Handling
+    # =========================================================================
+
+    async def _next_event(self) -> WorkflowEvent:
+        """Wait for and return the next event from the queue."""
+        await workflow.wait_condition(lambda: len(self._event_queue) > 0)
+        return self._event_queue.pop(0)
+
+    async def _wait_for_event_type(self, event_type: WorkflowEventType) -> WorkflowEvent:
+        """Wait for a specific event type, skipping others."""
+        while True:
+            event = await self._next_event()
+            if event.type == event_type or event.type == WorkflowEventType.STOP:
+                return event
+            workflow.logger.info(f"Ignoring event type {event.type} while waiting for {event_type}")
 
     # =========================================================================
     # Main workflow
@@ -195,12 +215,19 @@ class HumanInTheLoopWorkflow:
 
         # Handle initial message or produce greeting
         if initial_message:
+            # Add to messages and push a dummy event to trigger the first turn
             self._state.messages.append(
                 ChatMessage(
                     role="user", content=initial_message, timestamp=workflow.now()
                 )
             )
-            self._has_pending_input = True
+            self._event_queue.append(
+                WorkflowEvent(
+                    type=WorkflowEventType.MESSAGE,
+                    payload=initial_message,
+                    timestamp=workflow.now()
+                )
+            )
         else:
             # No initial message - produce a greeting
             greeting = (
@@ -210,7 +237,7 @@ class HumanInTheLoopWorkflow:
                 "- Ask me to fetch and investigate current alerts\n"
                 "- Describe an issue you're experiencing\n"
                 "- Ask questions about your infrastructure\n\n"
-                "How can I help you today?"
+                "How can I help today?"
             )
             self._state.messages.append(
                 ChatMessage(
@@ -222,17 +249,14 @@ class HumanInTheLoopWorkflow:
         # Conversation loop
         turn_count = 0
         while not self._should_end and turn_count < self._config.max_turns:
-            # Wait for user input if no pending messages
-            if not self._has_pending_input:
-                workflow.logger.info("Waiting for user input...")
-                await workflow.wait_condition(lambda: self._has_pending_input)
+            # Wait for user input (MESSAGE or STOP)
+            workflow.logger.info("Waiting for user message...")
+            event = await self._wait_for_event_type(WorkflowEventType.MESSAGE)
 
-            if self._should_end:
+            if self._should_end or event.type == WorkflowEventType.STOP:
                 break
 
-            self._has_pending_input = False
             turn_count += 1
-
             # Build conversation history for the agent
             conversation = self._build_conversation_input()
 
@@ -243,7 +267,7 @@ class HumanInTheLoopWorkflow:
                 result = await Runner.run(
                     agent,
                     input=conversation,
-                    max_turns=30,  # Increased max turns per user message to allow deeper investigation
+                    max_turns=30,
                     run_config=self._run_config,
                 )
 
@@ -258,11 +282,6 @@ class HumanInTheLoopWorkflow:
 
                 workflow.logger.info(f"Agent response: {response[:200]}...")
 
-                # Check if this looks like a final report
-                if self._is_final_report(response):
-                    self._state.status = WorkflowStatus.COMPLETED
-                    workflow.logger.info("Investigation completed with final report")
-                    return response
 
             except Exception as e:
                 workflow.logger.error(f"Agent error: {e}")
@@ -288,77 +307,50 @@ class HumanInTheLoopWorkflow:
     def _create_investigation_agent(self) -> Agent:
         """Create the investigation agent with specialists."""
         available_mcp_servers = self._get_available_mcp_servers()
-        workflow_ref = self
 
-        # Create shared context tools
-        update_tool, get_tool, print_report_tool = create_shared_context_tools(
+        # Create shared context tools for the Orchestrator
+        update_tool, get_tool, print_report_tool, group_tool = create_shared_context_tools(
             self._shared_context, agent_name="InvestigationAgent"
         )
 
-        # Create the domain specialists
+        # Create tools for ComputeSpecialist
+        comp_update, comp_get, comp_print, comp_group = create_shared_context_tools(
+            self._shared_context, agent_name="ComputeSpecialist"
+        )
         compute_spec = new_specialist_agent(
             domain=DomainType.COMPUTE,
             model=self._config.model,
             available_mcp_servers=available_mcp_servers,
-            tools=[update_tool, get_tool, print_report_tool],
+            tools=[comp_update, comp_get, comp_print, comp_group],
+        )
+
+        # Create tools for StorageSpecialist
+        stor_update, stor_get, stor_print, stor_group = create_shared_context_tools(
+            self._shared_context, agent_name="StorageSpecialist"
         )
         storage_spec = new_specialist_agent(
             domain=DomainType.STORAGE,
             model=self._config.model,
             available_mcp_servers=available_mcp_servers,
-            tools=[update_tool, get_tool, print_report_tool],
+            tools=[stor_update, stor_get, stor_print, stor_group],
+        )
+
+        # Create tools for NetworkSpecialist
+        net_update, net_get, net_print, net_group = create_shared_context_tools(
+            self._shared_context, agent_name="NetworkSpecialist"
         )
         network_spec = new_specialist_agent(
             domain=DomainType.NETWORK,
             model=self._config.model,
             available_mcp_servers=available_mcp_servers,
-            tools=[update_tool, get_tool, print_report_tool],
+            tools=[net_update, net_get, net_print, net_group],
         )
-
-        # Map agent names to agent objects for dynamic selection
-        specialist_map = {
-            "ComputeSpecialist": compute_spec,
-            "StorageSpecialist": storage_spec,
-            "NetworkSpecialist": network_spec,
-        }
 
         # Create tools
         ask_user_tool = self._create_ask_user_tool()
         fetch_alerts_tool = self._create_fetch_alerts_tool()
-        # Pass specialist_map so select_specialist can directly run specialists
-        select_specialist_tool = self._create_select_specialist_tool(specialist_map)
-
-        # Create the SingleAlertInvestigator factory
-        async def on_handoff_to_investigator(ctx: Any, input: InvestigateAlertInput):
-            # 1. Find alert details from state
-            alert = next(
-                (a for a in workflow_ref._state.last_fetched_alerts if a.get("fingerprint") == input.fingerprint),
-                None
-            )
-
-            alert_context = f"Fingerprint: {input.fingerprint}\n"
-            if alert:
-                alert_context += f"Name: {alert.get('labels', {}).get('alertname', 'Unknown')}\n"
-                alert_context += f"Summary: {alert.get('annotations', {}).get('summary', 'N/A')}\n"
-                alert_context += f"Labels: {alert.get('labels', {})}\n"
-            else:
-                alert_context += "Alert details not found in cache. Please use MCP tools to find info if possible."
-
-            # 2. Create the investigator agent with select_specialist tool
-            # select_specialist now directly runs specialists and returns findings
-            agent_name = f"Investigator_{input.fingerprint[:8]}"
-            investigator = new_single_alert_investigator_agent(
-                model=workflow_ref._config.model,
-                tools=[update_tool, get_tool, ask_user_tool, select_specialist_tool],
-                agent_name=agent_name,
-                alert_context=alert_context,
-            )
-
-            return investigator
 
         # Create main investigation agent
-        # Handoffs are only used for investigate_alert (creating per-alert investigators)
-        # Specialist consultation is handled directly by select_specialist tool
         agent = Agent(
             name="InvestigationAgent",
             model=self._config.model,
@@ -366,19 +358,18 @@ class HumanInTheLoopWorkflow:
             tools=[
                 ask_user_tool,
                 fetch_alerts_tool,
-                select_specialist_tool,
                 print_report_tool,
+                get_tool,
+                update_tool,
+                group_tool,
             ],
-            handoffs=[
-                handoff(
-                    compute_spec,  # Placeholder, on_handoff returns the real investigator
-                    on_handoff=on_handoff_to_investigator,
-                    input_type=InvestigateAlertInput,
-                    tool_name_override="investigate_alert",
-                    tool_description_override="Hand off a specific alert to a specialized investigator for deep analysis."
-                ),
-            ],
+            handoffs=[compute_spec, storage_spec, network_spec],
         )
+
+        # Wire back-handoffs
+        compute_spec.handoffs = [agent]
+        storage_spec.handoffs = [agent]
+        network_spec.handoffs = [agent]
 
         return agent
 
@@ -400,37 +391,24 @@ class HumanInTheLoopWorkflow:
         async def ask_user(question: str) -> str:
             """Ask the user for clarification or additional information.
 
-            Use this when you need more context to proceed with the investigation.
-            The user will see your question and can provide an answer.
-
             Args:
-                question: The question to ask the user. Be specific about what
-                         information you need and why.
-
-            Returns:
-                The user's response to your question.
+                question: The question to ask the user.
             """
             workflow.logger.info(f"ask_user called: {question}")
 
-            # Set pending question in state
+            # Set pending question in state for UI
             workflow_ref._state.pending_question = question
 
-            # The question becomes the agent's response, then we wait for user
-            # This is handled by the conversation loop - we return a placeholder
-            # that indicates we're waiting for user input
-
             # Wait for user response
-            workflow_ref._has_pending_input = False
-            await workflow.wait_condition(
-                lambda: workflow_ref._has_pending_input or workflow_ref._should_end
-            )
+            event = await workflow_ref._wait_for_event_type(WorkflowEventType.MESSAGE)
 
+            # Clear pending question
             workflow_ref._state.pending_question = None
 
-            if workflow_ref._should_end:
+            if event.type == WorkflowEventType.STOP:
                 return "User ended the conversation."
 
-            response = workflow_ref._pending_user_response or ""
+            response = event.payload or ""
             workflow.logger.info(f"User responded to ask_user: {response[:100]}...")
             return response
 
@@ -444,22 +422,7 @@ class HumanInTheLoopWorkflow:
             status: str = "firing",
             alertname: str | None = None,
         ) -> str:
-            """Fetch alerts from Alertmanager.
-
-            Use this tool to get a list of current alerts. If the user does not specify a specific alert name,
-            you should call this tool without the 'alertname' parameter to get all alerts with the given status.
-
-            Args:
-                status (str): The status of alerts to fetch. Can be 'firing', 'resolved', or 'all'. Defaults to 'firing'.
-                alertname (Optional[str]): The specific name of an alert to filter by. Omit this to get all alerts.
-
-            Example:
-                User: "show me all firing alerts"
-                Tool Call: `fetch_alerts(status='firing')`
-
-            Returns:
-                A formatted summary of matching alerts (including names, fingerprints, and summaries) or a message if none are found.
-            """
+            """Fetch alerts from Alertmanager."""
             workflow.logger.info(f"fetch_alerts called: status={status}, alertname={alertname}")
 
             if not self._config.alertmanager_url:
@@ -477,7 +440,6 @@ class HumanInTheLoopWorkflow:
                     params,
                     start_to_close_timeout=timedelta(seconds=60),
                 )
-                # Store alerts in state for use by other tools/handoffs
                 self._state.last_fetched_alerts = alerts
             except Exception as e:
                 workflow.logger.error(f"Failed to fetch alerts: {e}")
@@ -486,15 +448,13 @@ class HumanInTheLoopWorkflow:
             if not alerts:
                 return f"No {status} alerts found" + (f" for '{alertname}'." if alertname else ".")
 
-            # Format the output for the agent
-            lines = [f"Found {len(alerts)} {status} alerts:"]
+            lines = [ f"Found {len(alerts)} {status} alerts:" ]
             for alert in alerts:
                 labels = alert.get("labels", {})
                 name = labels.get("alertname", "N/A")
                 fingerprint = alert.get("fingerprint", "N/A")
                 summary = alert.get("annotations", {}).get("summary", "No summary.")
                 lines.append(f"- **{name}** (Fingerprint: `{fingerprint}`): {summary}")
-                # Add a few key labels for context
                 for key, value in labels.items():
                     if key not in ["alertname", "severity"]:
                         lines.append(f"  - {key}: {value}")
@@ -503,83 +463,6 @@ class HumanInTheLoopWorkflow:
 
         return fetch_alerts
 
-    def _create_select_specialist_tool(self, specialist_map: dict[str, Agent]):
-        """Create the select_specialist tool that lets users choose and directly consults specialists.
-
-        Args:
-            specialist_map: Dictionary mapping specialist names to Agent objects.
-        """
-        workflow_ref = self
-
-        @function_tool
-        async def select_specialist(suggested: str, reason: str) -> str:
-            """Consult a domain specialist for expert analysis.
-
-            This tool lets the user choose which specialist to consult, then directly
-            runs the specialist and returns their findings.
-
-            Args:
-                suggested: Your suggested specialist based on the context.
-                          Must be one of: "ComputeSpecialist", "StorageSpecialist", "NetworkSpecialist"
-                reason: Why you suggest this specialist and what they should investigate
-                       (e.g., "Alert involves Ceph storage - investigate OSD status")
-
-            Returns:
-                The specialist's findings and analysis.
-
-            Example:
-                findings = select_specialist(
-                    suggested="StorageSpecialist",
-                    reason="Alert is for ceph-failure-test pod - investigate Ceph cluster health"
-                )
-                # Returns the specialist's detailed analysis
-            """
-            workflow.logger.info(f"select_specialist called: suggested={suggested}, reason={reason}")
-
-            # Set up agent selection request for the CLI
-            workflow_ref._state.pending_agent_selection = AgentSelectionRequest(
-                from_agent="InvestigationAgent",
-                suggested_agent=suggested,
-                reason=reason,
-                available_agents=HumanInTheLoopWorkflow.AVAILABLE_SPECIALISTS,
-            )
-            workflow_ref._pending_agent_selection = True
-            workflow_ref._selected_agent = None
-
-            # Wait for user selection
-            await workflow.wait_condition(lambda: not workflow_ref._pending_agent_selection)
-
-            # Clear the pending state
-            workflow_ref._state.pending_agent_selection = None
-            selected = workflow_ref._selected_agent
-
-            if not selected:
-                return "Selection cancelled by user. Please ask the user what they would like to do."
-
-            workflow.logger.info(f"User selected specialist: {selected}")
-
-            # Get the selected specialist agent
-            specialist = specialist_map.get(selected)
-            if not specialist:
-                return f"Error: Unknown specialist '{selected}'. Available: {list(specialist_map.keys())}"
-
-            # Run the specialist agent directly
-            workflow.logger.info(f"Running specialist {selected} with reason: {reason}")
-            try:
-                result = await Runner.run(
-                    specialist,
-                    input=f"Investigate: {reason}",
-                    max_turns=20,
-                    run_config=workflow_ref._run_config,
-                )
-                findings = result.final_output or "Specialist completed but returned no findings."
-                workflow.logger.info(f"Specialist {selected} completed: {findings[:200]}...")
-                return f"**{selected} Findings:**\n\n{findings}"
-            except Exception as e:
-                workflow.logger.error(f"Specialist {selected} failed: {e}")
-                return f"Error: Specialist {selected} encountered an error: {str(e)}"
-
-        return select_specialist
 
     # =========================================================================
     # Helpers
@@ -590,29 +473,15 @@ class HumanInTheLoopWorkflow:
         if not self._state.messages:
             return "Hello, I'm ready to help investigate infrastructure issues."
 
-        # Build a conversation summary
         lines = ["## Conversation History\n"]
-        for msg in self._state.messages[-10:]:  # Last 10 messages
+        for msg in self._state.messages[-10:]:
             role = "User" if msg.role == "user" else "Assistant"
             lines.append(f"**{role}:** {msg.content}\n")
 
-        # Add shared context if there are findings
         if self._shared_context.findings:
             lines.append("\n## Current Investigation Findings\n")
             lines.append(self._shared_context.format_summary())
 
         return "\n".join(lines)
 
-    def _is_final_report(self, response: str) -> bool:
-        """Check if the response looks like a final investigation report."""
-        # Look for indicators of a final report
-        indicators = [
-            "root cause analysis",
-            "root cause:",
-            "recommended actions:",
-            "remediation steps:",
-            "investigation complete",
-            "summary of findings",
-        ]
-        response_lower = response.lower()
-        return any(indicator in response_lower for indicator in indicators)
+

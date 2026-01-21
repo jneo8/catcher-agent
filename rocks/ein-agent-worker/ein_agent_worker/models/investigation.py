@@ -38,6 +38,15 @@ class SharedFinding(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class InvestigationGroup(BaseModel):
+    """A grouping of related findings representing a specific incident or root cause."""
+    name: str = Field(..., description="Name of the group (e.g., 'Ceph Cluster Failure')")
+    finding_indices: List[int] = Field(..., description="Indices of findings in this group (0-based)")
+    analysis: str = Field(..., description="Analysis of how these findings are related")
+    agent_name: str = Field(..., description="Name of the agent creating the group")
+    timestamp: Optional[datetime] = Field(default=None, description="When created")
+
+
 class SharedContext(BaseModel):
     """The Blackboard - a shared context for all agents.
 
@@ -47,6 +56,7 @@ class SharedContext(BaseModel):
     """
 
     findings: List[SharedFinding] = Field(default_factory=list)
+    groups: List[InvestigationGroup] = Field(default_factory=list)
 
     def add_finding(
         self,
@@ -80,6 +90,36 @@ class SharedContext(BaseModel):
         )
         self.findings.append(finding)
         return finding
+
+    def add_group(
+        self,
+        name: str,
+        finding_indices: List[int],
+        analysis: str,
+        agent_name: str,
+        timestamp: Optional[datetime] = None
+    ) -> InvestigationGroup:
+        """Add a new group of findings.
+
+        Args:
+            name: Group name
+            finding_indices: List of finding indices (0-based)
+            analysis: Root cause analysis
+            agent_name: Agent creating the group
+            timestamp: Creation timestamp
+
+        Returns:
+            The created InvestigationGroup
+        """
+        group = InvestigationGroup(
+            name=name,
+            finding_indices=finding_indices,
+            analysis=analysis,
+            agent_name=agent_name,
+            timestamp=timestamp
+        )
+        self.groups.append(group)
+        return group
 
     def get_findings(
         self,

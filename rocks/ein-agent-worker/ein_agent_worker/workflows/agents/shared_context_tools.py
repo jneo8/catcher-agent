@@ -14,7 +14,7 @@ from ein_agent_worker.models import SharedContext
 def create_shared_context_tools(
     shared_context: SharedContext,
     agent_name: str
-) -> Tuple[Callable, Callable, Callable]:
+) -> Tuple[Callable, Callable, Callable, Callable]:
     """Create shared context tools bound to a specific context and agent.
 
     Args:
@@ -22,7 +22,7 @@ def create_shared_context_tools(
         agent_name: Name of the agent using these tools
 
     Returns:
-        Tuple of (update_shared_context, get_shared_context, print_findings_report) function tools
+        Tuple of (update_shared_context, get_shared_context, print_findings_report, group_findings) function tools
     """
 
     @function_tool
@@ -267,4 +267,57 @@ def create_shared_context_tools(
 
         return report
 
-    return update_shared_context, get_shared_context, print_findings_report
+    @function_tool
+    def group_findings(
+        name: str,
+        finding_indices: List[int],
+        analysis: str
+    ) -> str:
+        """Group related findings into a named incident or root cause.
+
+        Use this tool to consolidate multiple findings that point to the same underlying issue.
+        Finding indices correspond to the numbers shown in the shared context summary (see get_shared_context).
+
+        Args:
+            name: Name of the group/incident (e.g. "Ceph OSD Failure")
+            finding_indices: List of finding indices (1-based) to group together.
+            analysis: Explanation of how these findings are related and the root cause.
+
+        Returns:
+            Confirmation message
+        """
+        workflow.logger.info(
+            f"[Tool Call] group_findings called by {agent_name}: "
+            f"name={name}, indices={finding_indices}"
+        )
+
+        # Convert 1-based indices to 0-based
+        indices_0 = [i - 1 for i in finding_indices]
+        
+        # Validation
+        valid_indices = []
+        invalid_indices = []
+        for i in indices_0:
+            if 0 <= i < len(shared_context.findings):
+                valid_indices.append(i)
+            else:
+                invalid_indices.append(i + 1)
+        
+        if invalid_indices:
+             return f"Error: Invalid indices {invalid_indices}. Valid range: 1-{len(shared_context.findings)}"
+        
+        if not valid_indices:
+            return "Error: No valid findings selected."
+
+        group = shared_context.add_group(
+            name=name,
+            finding_indices=valid_indices,
+            analysis=analysis,
+            agent_name=agent_name,
+            timestamp=workflow.now()
+        )
+        
+        workflow.logger.info(f"[Tool Result] Created group '{name}'")
+        return f"Created group '{name}' with {len(valid_indices)} findings."
+
+    return update_shared_context, get_shared_context, print_findings_report, group_findings

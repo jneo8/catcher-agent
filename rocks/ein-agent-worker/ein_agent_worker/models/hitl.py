@@ -63,3 +63,20 @@ class HITLConfig(BaseModel):
         ge=1,
         description="Maximum agent turns before stopping",
     )
+
+
+class WorkflowEventType(str, Enum):
+    """Types of events that can be sent to the workflow."""
+
+    MESSAGE = "message"
+    CONFIRMATION = "confirmation"
+    SELECTION = "selection"
+    STOP = "stop"
+
+
+class WorkflowEvent(BaseModel):
+    """An event sent to the workflow."""
+
+    type: WorkflowEventType
+    payload: Any = None
+    timestamp: datetime | None = Field(default=None, description="Event timestamp (set by workflow)")
