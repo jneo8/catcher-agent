@@ -1,14 +1,31 @@
-"""Orchestrator for Human-in-the-Loop investigation workflow."""
-
 import asyncio
+import functools
 from datetime import datetime
 from typing import Any
 
 from temporalio.client import Client as TemporalClient, WorkflowHandle
 import temporalio.common
+from temporalio.service import RPCError
 
 from ein_agent_cli import console
 from ein_agent_cli.models import HITLWorkflowConfig
+
+
+def handle_rpc_error(return_on_error: Any = None, print_error: bool = True):
+    """Decorator to handle RPC errors (specifically workflow completion)."""
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            try:
+                return await func(*args, **kwargs)
+            except RPCError as e:
+                if "workflow execution already completed" in str(e).lower():
+                    if print_error:
+                        console.print_error("Cannot perform action: Workflow is already completed.")
+                    return return_on_error
+                raise
+        return wrapper
+    return decorator
 
 
 class HITLOrchestrator:
@@ -95,6 +112,7 @@ class HITLOrchestrator:
 
         return cls(handle, config)
 
+    @handle_rpc_error()
     async def send_message(self, message: str) -> None:
         """Send a message to the agent.
 
@@ -103,10 +121,12 @@ class HITLOrchestrator:
         """
         await self.handle.signal("send_message", message)
 
+    @handle_rpc_error(print_error=False)
     async def end_workflow(self) -> None:
         """End the workflow."""
         await self.handle.signal("end_workflow")
 
+    @handle_rpc_error()
     async def provide_confirmation(self, confirmed: bool) -> None:
         """Send confirmation for a pending tool call.
 
@@ -115,6 +135,7 @@ class HITLOrchestrator:
         """
         await self.handle.signal("provide_confirmation", confirmed)
 
+    @handle_rpc_error()
     async def provide_agent_selection(self, selected_agent: str) -> None:
         """Send the selected agent for a pending handoff.
 
@@ -123,6 +144,7 @@ class HITLOrchestrator:
         """
         await self.handle.signal("provide_agent_selection", selected_agent)
 
+    @handle_rpc_error(return_on_error={"status": "completed"}, print_error=False)
     async def get_state(self) -> dict[str, Any]:
         """Get current workflow state.
 
