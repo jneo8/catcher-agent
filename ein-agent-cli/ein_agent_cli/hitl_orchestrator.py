@@ -253,13 +253,16 @@ class HITLOrchestrator:
 
             # Check for new messages
             if current_count > self._last_message_count:
-                # Find new assistant messages
-                new_messages = messages[self._last_message_count:]
-                self._last_message_count = current_count
-
-                for msg in new_messages:
+                # Iterate through new messages
+                for i in range(self._last_message_count, current_count):
+                    msg = messages[i]
                     if msg.get("role") == "assistant":
+                        # Update counter to next message and return
+                        self._last_message_count = i + 1
                         return msg.get("content", "")
+
+                # No assistant messages found in new batch
+                self._last_message_count = current_count
 
             # Check for pending question from agent (ask_user tool)
             if pending_question:
@@ -293,6 +296,7 @@ class HITLOrchestrator:
         console.print_dim("Type your message and press Enter. Type /quit to exit.\n")
 
         # Wait for initial response if workflow just started
+        # If we just connected and there are existing messages, wait_for_response will return them
         console.print_dim("Waiting for agent...")
         initial_response = await self.wait_for_response()
         if initial_response:
@@ -424,4 +428,35 @@ async def run_hitl_workflow(config: HITLWorkflowConfig) -> None:
 
     except Exception as e:
         console.print_error(f"Error: {e}")
+        raise
+
+
+async def connect_hitl_workflow(config: HITLWorkflowConfig) -> None:
+    """Connect to an existing human-in-the-loop investigation workflow.
+
+    Args:
+        config: Workflow configuration (must have workflow_id)
+    """
+    if not config.workflow_id:
+        raise ValueError("Workflow ID is required to connect")
+
+    try:
+        console.print_header("Ein Agent - Interactive Investigation (Reconnecting)\n")
+
+        # Connect to orchestrator
+        orchestrator = await HITLOrchestrator.connect(
+            config=config,
+            workflow_id=config.workflow_id,
+        )
+
+        # Check status
+        status = await orchestrator.get_status()
+        if status in ["completed", "ended"]:
+            console.print_warning(f"Workflow {config.workflow_id} is already {status}.")
+
+        # Run interactive loop
+        await orchestrator.run_interactive()
+
+    except Exception as e:
+        console.print_error(f"Error connecting to workflow: {e}")
         raise
