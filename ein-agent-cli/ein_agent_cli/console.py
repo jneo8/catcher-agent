@@ -2,6 +2,7 @@
 
 from typing import Optional
 from rich.console import Console
+from rich.panel import Panel
 
 # Global console instance
 _console = Console()
@@ -25,6 +26,17 @@ def print_message(message: str, color: Optional[str] = None, style: Optional[str
         _console.print(f"[{markup}]{message}[/{markup}]")
     else:
         _console.print(message)
+
+
+def print_panel(content: str, title: Optional[str] = None, border_style: str = "blue") -> None:
+    """Print a panel with content.
+
+    Args:
+        content: The content to display inside the panel.
+        title: Optional title for the panel.
+        border_style: Style for the panel border (default: "blue").
+    """
+    _console.print(Panel(content, title=title, border_style=border_style))
 
 
 def print_dim(message: str) -> None:

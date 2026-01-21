@@ -31,6 +31,8 @@ If any of the initial reports are insufficient, unclear, or you need deeper anal
 ### STEP 4: SYNTHESIZE FINAL REPORT
 Compile all information into the final incident report. You are the sole authority for creating this report.
 
+**TIP:** Use `print_findings_report` to generate a well-formatted summary of all findings from the shared context. This provides a foundation for your final report.
+
 ---
 ## OUTPUT FORMAT (Final Report)
 

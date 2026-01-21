@@ -11,6 +11,8 @@ from typing import List, Callable, Optional, Set
 from agents import Agent
 from temporalio.contrib import openai_agents
 
+from ein_agent_worker.workflows.mcp_config import get_mcp_activity_config
+
 
 class DomainType(str, Enum):
     """Domain types for specialist agents."""
@@ -25,8 +27,8 @@ class DomainType(str, Enum):
 # Which MCP servers are relevant for each domain
 DOMAIN_MCP_MAPPING: dict[DomainType, Set[str]] = {
     DomainType.COMPUTE: {"kubernetes", "grafana"},
-    DomainType.STORAGE: {"ceph", "kubernetes", "grafana"},
-    DomainType.NETWORK: {"kubernetes", "grafana"},
+    DomainType.STORAGE: {"ceph"},
+    DomainType.NETWORK: {"kubernetes"},
 }
 
 
@@ -63,7 +65,8 @@ update_shared_context(
 ```
 
 ### STEP 4: RETURN TO INVESTIGATOR
-When your investigation is complete, use the appropriate `transfer_to_investigator_...` tool from your available tools to return your findings to the investigator who called you. Provide your detailed report in the `instruction` argument of the tool call.
+When your investigation is complete, use the `transfer_to_investigation_agent` tool to return your findings.
+IMPORTANT: You cannot hand off to other specialists. Your role is strictly to investigate your domain and report back to the main investigator who coordinates the next steps.
 
 ---
 ## KEY PATTERNS
@@ -122,7 +125,8 @@ Key format examples:
 - 'pvc:namespace/pvc-name' for PVCs
 
 ### STEP 4: RETURN TO INVESTIGATOR
-When your investigation is complete, use the appropriate `transfer_to_investigator_...` tool from your available tools to return your findings to the investigator who called you. Provide your detailed report in the `instruction` argument of the tool call.
+When your investigation is complete, use the `transfer_to_investigation_agent` tool to return your findings.
+IMPORTANT: You cannot hand off to other specialists. Your role is strictly to investigate your domain and report back to the main investigator who coordinates the next steps.
 
 ---
 ## KEY PATTERNS
@@ -182,7 +186,8 @@ Key format examples:
 - 'dns:coredns' for DNS issues
 
 ### STEP 4: RETURN TO INVESTIGATOR
-When your investigation is complete, use the appropriate `transfer_to_investigator_...` tool from your available tools to return your findings to the investigator who called you. Provide your detailed report in the `instruction` argument of the tool call.
+When your investigation is complete, use the `transfer_to_investigation_agent` tool to return your findings.
+IMPORTANT: You cannot hand off to other specialists. Your role is strictly to investigate your domain and report back to the main investigator who coordinates the next steps.
 
 ---
 ## KEY PATTERNS
@@ -225,6 +230,9 @@ def get_relevant_mcp_servers(
 ) -> List[str]:
     """Get the MCP servers relevant for a domain that are also available.
 
+    Uses keyword matching to identify relevant servers (e.g., 'ceph' keyword
+    matches 'ceph-mcp' or 'my-ceph-server').
+
     Args:
         domain: The domain type
         available_mcp_servers: List of MCP server names that are configured
@@ -232,9 +240,16 @@ def get_relevant_mcp_servers(
     Returns:
         List of MCP server names that are both relevant and available
     """
-    relevant = DOMAIN_MCP_MAPPING.get(domain, set())
-    available_set = {s.lower() for s in available_mcp_servers}
-    return [s for s in relevant if s.lower() in available_set]
+    relevant_keywords = DOMAIN_MCP_MAPPING.get(domain, set())
+    
+    matched_servers = []
+    for available_server in available_mcp_servers:
+        available_lower = available_server.lower()
+        for keyword in relevant_keywords:
+            if keyword.lower() in available_lower:
+                matched_servers.append(available_server)
+                break
+    return matched_servers
 
 
 def new_specialist_agent(
@@ -262,7 +277,10 @@ def new_specialist_agent(
 
     # Create MCP server references for Temporal
     mcp_servers = [
-        openai_agents.workflow.stateless_mcp_server(server)
+        openai_agents.workflow.stateless_mcp_server(
+            server,
+            config=get_mcp_activity_config()
+        )
         for server in relevant_servers
     ]
 

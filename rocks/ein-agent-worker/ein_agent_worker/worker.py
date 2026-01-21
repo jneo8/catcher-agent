@@ -10,7 +10,9 @@ from temporalio.worker import Worker
 
 from agents.extensions.models.litellm_provider import LitellmProvider
 from ein_agent_worker.mcp_providers import MCPConfig, MCPProviderRegistry, load_mcp_config
+from ein_agent_worker.activities import fetch_alerts_activity
 from ein_agent_worker.workflows.incident_correlation_workflow import IncidentCorrelationWorkflow
+from ein_agent_worker.workflows.human_in_the_loop import HumanInTheLoopWorkflow
 # Note: No activities needed - agent orchestration happens in workflows now
 # MCP operations are handled by the OpenAIAgentsPlugin via stateless_mcp_server()
 from temporalio.contrib.openai_agents import OpenAIAgentsPlugin, ModelActivityParameters
@@ -62,8 +64,9 @@ async def main():
         task_queue=queue,
         workflows=[
             IncidentCorrelationWorkflow,
+            HumanInTheLoopWorkflow,
         ],
-        activities=[load_mcp_config],  # Registered load_mcp_config
+        activities=[load_mcp_config, fetch_alerts_activity],  # Registered load_mcp_config
     )
 
     logger.info("Worker started successfully on queue: %s", queue)

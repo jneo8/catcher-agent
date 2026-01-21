@@ -163,7 +163,7 @@ class IncidentCorrelationWorkflow:
         # 1. Create Domain Specialists
         specialists = {}
         for domain in DomainType:
-            update_tool, get_tool = create_shared_context_tools(
+            update_tool, get_tool, print_report_tool = create_shared_context_tools(
                 self.shared_context,
                 agent_name=f"{domain.value.title()}Specialist"
             )
@@ -172,7 +172,7 @@ class IncidentCorrelationWorkflow:
                 domain=domain,
                 model=self.model,
                 available_mcp_servers=available_mcp_servers,
-                tools=[update_tool, get_tool],
+                tools=[update_tool, get_tool, print_report_tool],
             )
             specialists[agent.name] = agent
             agents[agent.name] = agent
@@ -187,7 +187,7 @@ class IncidentCorrelationWorkflow:
             agent_name = f"Investigator_{alert_id}"
 
             # Create shared context tools for this investigator
-            update_tool, get_tool = create_shared_context_tools(
+            update_tool, get_tool, print_report_tool = create_shared_context_tools(
                 self.shared_context,
                 agent_name=agent_name
             )
@@ -197,7 +197,7 @@ class IncidentCorrelationWorkflow:
 
             investigator = new_single_alert_investigator_agent(
                 model=self.model,
-                tools=[update_tool, get_tool],
+                tools=[update_tool, get_tool, print_report_tool],
                 agent_name=agent_name,
                 alert_context=alert_context,
             )
@@ -212,13 +212,13 @@ class IncidentCorrelationWorkflow:
             })
 
         # 3. Create InvestigationProjectManager
-        _, get_tool = create_shared_context_tools(
+        _, get_tool, print_report_tool = create_shared_context_tools(
             self.shared_context,
             agent_name="InvestigationProjectManager"
         )
         project_manager = new_investigation_project_manager_agent(
             model=self.model,
-            tools=[get_tool],
+            tools=[get_tool, print_report_tool],
         )
         agents["InvestigationProjectManager"] = project_manager
 
