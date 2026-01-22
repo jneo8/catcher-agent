@@ -1,5 +1,6 @@
 """Utility functions for workflows."""
 
+import logging as std_logging
 from typing import Any, Dict, List
 
 def format_alert_list(alerts: List[Dict[str, Any]]) -> str:
@@ -113,8 +114,6 @@ def log_investigation_path(result: Any, logger: Any = None) -> None:
         result: RunResult from agents.Runner.run()
         logger: Logger to use (defaults to Python logging if not provided)
     """
-    import logging as std_logging
-
     # Use provided logger, or fall back to standard Python logger
     log = logger if logger is not None else std_logging.getLogger(__name__)
 

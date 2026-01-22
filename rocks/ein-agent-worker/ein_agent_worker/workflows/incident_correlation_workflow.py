@@ -1,8 +1,10 @@
+import asyncio
 from datetime import timedelta
-from typing import Any, Optional, Dict, List, TYPE_CHECKING
+from typing import Any, Optional, Dict, List
 
 from agents import Agent, Runner, RunConfig
 from temporalio import workflow
+
 from ein_agent_worker.models import InvestigationConfig, SharedContext
 from ein_agent_worker.workflows.agents.investigation_project_manager import (
     new_investigation_project_manager_agent,
@@ -16,8 +18,16 @@ from ein_agent_worker.workflows.utils import (
     log_investigation_path,
 )
 
-if TYPE_CHECKING:
-    from ein_agent_worker.mcp_providers import MCPConfig
+with workflow.unsafe.imports_passed_through():
+    from agents.extensions.models.litellm_provider import LitellmProvider
+    from ein_agent_worker.mcp_providers import MCPConfig, load_mcp_config
+    from ein_agent_worker.workflows.agents.specialists import (
+        DomainType,
+        new_specialist_agent,
+    )
+    from ein_agent_worker.workflows.agents.shared_context_tools import (
+        create_shared_context_tools,
+    )
 
 
 def _get_alert_identifier(alert: dict[str, Any], index: int) -> str:
@@ -41,7 +51,7 @@ class IncidentCorrelationWorkflow:
 
     def __init__(self):
         self.model: str = ""
-        self.mcp_config: "MCPConfig | None" = None
+        self.mcp_config: MCPConfig | None = None
         self.run_config: Optional[RunConfig] = None
         self.shared_context: Optional[SharedContext] = None
         self.alerts: list[dict[str, Any]] = []
@@ -53,10 +63,6 @@ class IncidentCorrelationWorkflow:
         config: Optional[InvestigationConfig] = None,
     ) -> str:
         """Investigate alerts and produce incident report."""
-        # Import inside run to avoid sandbox issues
-        from agents.extensions.models.litellm_provider import LitellmProvider
-        from ein_agent_worker.mcp_providers import load_mcp_config
-
         config = config or InvestigationConfig()
         self.alerts = alerts
 
@@ -77,8 +83,6 @@ class IncidentCorrelationWorkflow:
         project_manager = agents["InvestigationProjectManager"]
 
         # Phase 1: Parallel Initial Investigation (Code-Driven coverage)
-        import asyncio
-        
         # Filter for investigators
         investigators = [agent for name, agent in agents.items() if name.startswith("Investigator_")]
         
@@ -154,15 +158,6 @@ class IncidentCorrelationWorkflow:
         Returns:
             Tuple of (agents dict, investigator info list)
         """
-        # Import inside method to avoid sandbox issues
-        from ein_agent_worker.workflows.agents.specialists import (
-            DomainType,
-            new_specialist_agent,
-        )
-        from ein_agent_worker.workflows.agents.shared_context_tools import (
-            create_shared_context_tools,
-        )
-
         agents = {}
         available_mcp_servers = self._get_available_mcp_servers()
 
