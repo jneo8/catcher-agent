@@ -56,7 +56,6 @@ def connect(
         temporal_queue=temporal_queue,
         workflow_id=workflow_id,
         model=None,
-        alertmanager_url=None,
         max_turns=50,
     )
 
@@ -217,12 +216,6 @@ def investigate(
         "-m",
         help="LLM model to use (e.g., gemini/gemini-2.5-flash)",
     ),
-    alertmanager_url: Optional[str] = typer.Option(
-        None,
-        "--alertmanager-url",
-        "-a",
-        help="Alertmanager URL for fetching alerts",
-    ),
     max_turns: int = typer.Option(
         50,
         "--max-turns",
@@ -253,9 +246,6 @@ def investigate(
       # Connect to specific Temporal instance
       ein-agent-cli investigate --temporal-host localhost:7233
 
-      # With Alertmanager integration
-      ein-agent-cli investigate -a http://alertmanager:9093
-
     Interactive Commands:
       /quit, /exit, /q  - End the conversation
       /status           - Show workflow status
@@ -267,7 +257,6 @@ def investigate(
         temporal_queue=temporal_queue,
         workflow_id=workflow_id,
         model=model,
-        alertmanager_url=alertmanager_url,
         max_turns=max_turns,
     )
 

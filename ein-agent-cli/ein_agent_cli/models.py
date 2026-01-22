@@ -385,7 +385,6 @@ class HITLWorkflowConfig(BaseModel):
         temporal_queue: Optional[str],
         workflow_id: Optional[str],
         model: Optional[str],
-        alertmanager_url: Optional[str],
         max_turns: int,
     ) -> "HITLWorkflowConfig":
         """Create config from CLI arguments."""
@@ -404,7 +403,5 @@ class HITLWorkflowConfig(BaseModel):
         )
         if model is not None:
             config.model = model
-        if alertmanager_url is not None:
-            config.alertmanager_url = alertmanager_url
 
         return config
