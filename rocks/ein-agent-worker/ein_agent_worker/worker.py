@@ -8,7 +8,7 @@ from temporalio.client import Client
 from temporalio.common import RetryPolicy
 from temporalio.worker import Worker
 
-from agents.extensions.models.litellm_provider import LitellmProvider
+from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
 from ein_agent_worker.models.hitl import DEFAULT_MODEL
 from ein_agent_worker.mcp_providers import MCPConfig, MCPProviderRegistry, load_mcp_config
 from ein_agent_worker.activities.alertmanager import fetch_alerts_activity
@@ -54,8 +54,8 @@ async def main():
                         maximum_attempts=1,  # Only try once, no automatic retries
                     ),
                 ),
-                # The Gemini needs to define GEMINI_API_KEY environment variable
-                model_provider=LitellmProvider(),
+                # Use Gemini-compatible provider that handles message ordering
+                model_provider=GeminiCompatibleLitellmProvider(),
                 mcp_server_providers=mcp_providers,
             )
         ],

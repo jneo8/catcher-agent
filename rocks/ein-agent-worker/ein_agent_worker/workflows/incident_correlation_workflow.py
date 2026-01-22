@@ -19,7 +19,7 @@ from ein_agent_worker.workflows.utils import (
 )
 
 with workflow.unsafe.imports_passed_through():
-    from agents.extensions.models.litellm_provider import LitellmProvider
+    from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
     from ein_agent_worker.mcp_providers import MCPConfig, load_mcp_config
     from ein_agent_worker.activities.worker_config import load_worker_model
     from ein_agent_worker.workflows.agents.specialists import (
@@ -77,7 +77,7 @@ class IncidentCorrelationWorkflow:
         workflow.logger.info(f"Using model: {self.model}")
 
         # Initialize
-        self.run_config = RunConfig(model_provider=LitellmProvider())
+        self.run_config = RunConfig(model_provider=GeminiCompatibleLitellmProvider())
         self.shared_context = SharedContext()
 
         self.mcp_config = await workflow.execute_activity(
