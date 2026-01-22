@@ -363,10 +363,6 @@ class HITLWorkflowConfig(BaseModel):
         default=None,
         description="Custom workflow ID"
     )
-    model: str = Field(
-        default="gemini/gemini-2.5-flash",
-        description="LLM model to use"
-    )
     alertmanager_url: Optional[str] = Field(
         default=None,
         description="Alertmanager URL for fetching alerts"
@@ -384,7 +380,6 @@ class HITLWorkflowConfig(BaseModel):
         temporal_namespace: Optional[str],
         temporal_queue: Optional[str],
         workflow_id: Optional[str],
-        model: Optional[str],
         max_turns: int,
     ) -> "HITLWorkflowConfig":
         """Create config from CLI arguments."""
@@ -396,12 +391,8 @@ class HITLWorkflowConfig(BaseModel):
         if temporal_queue is not None:
             temporal_config.queue = temporal_queue
 
-        config = cls(
+        return cls(
             temporal=temporal_config,
             workflow_id=workflow_id,
             max_turns=max_turns,
         )
-        if model is not None:
-            config.model = model
-
-        return config

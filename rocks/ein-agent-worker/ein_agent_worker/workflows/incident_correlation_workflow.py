@@ -21,6 +21,7 @@ from ein_agent_worker.workflows.utils import (
 with workflow.unsafe.imports_passed_through():
     from agents.extensions.models.litellm_provider import LitellmProvider
     from ein_agent_worker.mcp_providers import MCPConfig, load_mcp_config
+    from ein_agent_worker.activities.worker_config import load_worker_model
     from ein_agent_worker.workflows.agents.specialists import (
         DomainType,
         new_specialist_agent,
@@ -68,8 +69,14 @@ class IncidentCorrelationWorkflow:
 
         workflow.logger.info(f"Starting multi-agent investigation for {len(alerts)} alerts")
 
+        # Load worker model configuration from environment
+        self.model = await workflow.execute_activity(
+            load_worker_model,
+            start_to_close_timeout=timedelta(seconds=10),
+        )
+        workflow.logger.info(f"Using model: {self.model}")
+
         # Initialize
-        self.model = config.model
         self.run_config = RunConfig(model_provider=LitellmProvider())
         self.shared_context = SharedContext()
 

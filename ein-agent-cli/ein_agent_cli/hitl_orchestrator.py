@@ -67,9 +67,8 @@ class HITLOrchestrator:
 
         console.print_info(f"Starting workflow: {workflow_id}")
 
-        # Prepare workflow config
+        # Prepare workflow config (model is configured on worker via EIN_AGENT_MODEL env var)
         workflow_config = {
-            "model": config.model,
             "alertmanager_url": config.alertmanager_url,
             "max_turns": config.max_turns,
         }

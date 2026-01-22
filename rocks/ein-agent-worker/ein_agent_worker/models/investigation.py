@@ -5,12 +5,18 @@ from typing import Optional, List, Dict, Any
 
 from pydantic import BaseModel, Field
 
+# Default model used when EIN_AGENT_MODEL environment variable is not set
+DEFAULT_MODEL = "gemini/gemini-2.5-flash"
+
 
 class InvestigationConfig(BaseModel):
     """Configuration for investigation."""
 
-    # LLM model to use.
-    model: str = "gemini/gemini-2.5-flash" 
+    # LLM model to use. Can be overridden by load_worker_config activity.
+    model: str = Field(
+        default=DEFAULT_MODEL,
+        description="LLM model to use",
+    ) 
 
 
 class SharedFinding(BaseModel):

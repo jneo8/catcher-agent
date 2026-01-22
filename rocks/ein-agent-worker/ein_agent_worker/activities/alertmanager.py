@@ -1,9 +1,11 @@
 """Alertmanager activities."""
 
+import os
 from typing import List, Optional
+
 import httpx
-from temporalio import activity
 from pydantic import BaseModel, Field
+from temporalio import activity
 
 
 class AlertmanagerAlert(BaseModel):
@@ -22,52 +24,53 @@ class FetchAlertsParams(BaseModel):
     alertname: str | None = None
 
 
-def create_fetch_alerts_activity(default_alertmanager_url: Optional[str] = None):
-    """Factory to create fetch_alerts activity with injected default URL."""
+@activity.defn(name="fetch_alerts_activity")
+async def fetch_alerts_activity(params: FetchAlertsParams) -> List[dict]:
+    """Activity to fetch alerts from Alertmanager.
 
-    @activity.defn(name="fetch_alerts_activity")
-    async def fetch_alerts_activity(params: FetchAlertsParams) -> List[dict]:
-        """Activity to fetch alerts from Alertmanager."""
-        alertmanager_url = params.alertmanager_url or default_alertmanager_url
-        
-        if not alertmanager_url:
-            raise ValueError("alertmanager_url is required (params or default)")
+    The Alertmanager URL can be provided in params or via ALERTMANAGER_URL env var.
+    """
+    # Read from params first, then fall back to environment variable
+    alertmanager_url = params.alertmanager_url or os.getenv("ALERTMANAGER_URL")
 
-        api_url = f"{alertmanager_url.rstrip('/')}/api/v2/alerts"
-        activity.logger.info(f"Querying Alertmanager API: {api_url}")
+    if not alertmanager_url:
+        raise ValueError(
+            "alertmanager_url is required (provide in params or set ALERTMANAGER_URL env var)"
+        )
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            try:
-                response = await client.get(api_url)
-                response.raise_for_status()
-                alerts_data = response.json()
-            except httpx.HTTPStatusError as e:
-                activity.logger.error(f"HTTP error querying Alertmanager: {e}")
-                raise
-            except httpx.RequestError as e:
-                activity.logger.error(f"Request error querying Alertmanager: {e}")
-                raise
+    api_url = f"{alertmanager_url.rstrip('/')}/api/v2/alerts"
+    activity.logger.info(f"Querying Alertmanager API: {api_url}")
 
-        alerts = [AlertmanagerAlert(**alert) for alert in alerts_data]
-        activity.logger.info(f"Retrieved {len(alerts)} total alerts from Alertmanager")
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            response = await client.get(api_url)
+            response.raise_for_status()
+            alerts_data = response.json()
+        except httpx.HTTPStatusError as e:
+            activity.logger.error(f"HTTP error querying Alertmanager: {e}")
+            raise
+        except httpx.RequestError as e:
+            activity.logger.error(f"Request error querying Alertmanager: {e}")
+            raise
 
-        filtered_alerts = []
-        for alert in alerts:
-            alert_status = alert.labels.get("state", "firing") # fallback for older versions
-            if hasattr(alert, 'status') and hasattr(alert.status, 'state'):
-                 alert_status = alert.status.state
+    alerts = [AlertmanagerAlert(**alert) for alert in alerts_data]
+    activity.logger.info(f"Retrieved {len(alerts)} total alerts from Alertmanager")
 
-            # Apply status filter
-            if params.status != "all" and alert_status != params.status:
-                continue
+    filtered_alerts = []
+    for alert in alerts:
+        alert_status = alert.labels.get("state", "firing")  # fallback for older versions
+        if hasattr(alert, "status") and hasattr(alert.status, "state"):
+            alert_status = alert.status.state
 
-            # Apply alertname filter
-            if params.alertname and alert.labels.get("alertname") != params.alertname:
-                continue
+        # Apply status filter
+        if params.status != "all" and alert_status != params.status:
+            continue
 
-            filtered_alerts.append(alert.model_dump())
+        # Apply alertname filter
+        if params.alertname and alert.labels.get("alertname") != params.alertname:
+            continue
 
-        activity.logger.info(f"Returning {len(filtered_alerts)} filtered alerts")
-        return filtered_alerts
+        filtered_alerts.append(alert.model_dump())
 
-    return fetch_alerts_activity
+    activity.logger.info(f"Returning {len(filtered_alerts)} filtered alerts")
+    return filtered_alerts

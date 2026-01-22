@@ -210,12 +210,6 @@ def investigate(
         "--workflow-id",
         help="Custom workflow ID",
     ),
-    model: Optional[str] = typer.Option(
-        None,
-        "--model",
-        "-m",
-        help="LLM model to use (e.g., gemini/gemini-2.5-flash)",
-    ),
     max_turns: int = typer.Option(
         50,
         "--max-turns",
@@ -240,9 +234,6 @@ def investigate(
       # Start interactive investigation with default settings
       ein-agent-cli investigate
 
-      # Use a specific model
-      ein-agent-cli investigate -m gemini/gemini-2.0-flash
-
       # Connect to specific Temporal instance
       ein-agent-cli investigate --temporal-host localhost:7233
 
@@ -256,7 +247,6 @@ def investigate(
         temporal_namespace=temporal_namespace,
         temporal_queue=temporal_queue,
         workflow_id=workflow_id,
-        model=model,
         max_turns=max_turns,
     )
 

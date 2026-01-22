@@ -6,6 +6,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# Default model used when EIN_AGENT_MODEL environment variable is not set
+DEFAULT_MODEL = "gemini/gemini-2.5-flash"
+
 
 class WorkflowStatus(str, Enum):
     """Workflow lifecycle states."""
@@ -51,7 +54,7 @@ class HITLConfig(BaseModel):
     """Configuration for human-in-the-loop workflow."""
 
     model: str = Field(
-        default="gemini/gemini-2.5-flash",
+        default=DEFAULT_MODEL,
         description="LLM model to use",
     )
     alertmanager_url: str | None = Field(

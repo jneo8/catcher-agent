@@ -26,6 +26,7 @@ from ein_agent_worker.models import (
 with workflow.unsafe.imports_passed_through():
     from agents.extensions.models.litellm_provider import LitellmProvider
     from ein_agent_worker.mcp_providers import MCPConfig, load_mcp_config
+    from ein_agent_worker.activities.worker_config import load_worker_model
     from ein_agent_worker.workflows.agents.specialists import (
         DomainType,
         new_specialist_agent,
@@ -203,6 +204,13 @@ class HumanInTheLoopWorkflow:
 
         self._state.status = WorkflowStatus.RUNNING
         workflow.logger.info("Human-in-the-loop workflow started")
+
+        # Load worker model configuration from environment
+        self._config.model = await workflow.execute_activity(
+            load_worker_model,
+            start_to_close_timeout=timedelta(seconds=10),
+        )
+        workflow.logger.info(f"Using model: {self._config.model}")
 
         # Load MCP configuration
         self._mcp_config = await workflow.execute_activity(

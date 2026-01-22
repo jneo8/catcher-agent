@@ -9,8 +9,10 @@ from temporalio.common import RetryPolicy
 from temporalio.worker import Worker
 
 from agents.extensions.models.litellm_provider import LitellmProvider
+from ein_agent_worker.models.hitl import DEFAULT_MODEL
 from ein_agent_worker.mcp_providers import MCPConfig, MCPProviderRegistry, load_mcp_config
-from ein_agent_worker.activities.alertmanager import create_fetch_alerts_activity
+from ein_agent_worker.activities.alertmanager import fetch_alerts_activity
+from ein_agent_worker.activities.worker_config import load_worker_model
 from ein_agent_worker.workflows.incident_correlation_workflow import IncidentCorrelationWorkflow
 from ein_agent_worker.workflows.human_in_the_loop import HumanInTheLoopWorkflow
 # Note: No activities needed - agent orchestration happens in workflows now
@@ -27,16 +29,15 @@ async def main():
     host = os.getenv("TEMPORAL_HOST", "localhost:7233")
     namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
     queue = os.getenv("TEMPORAL_QUEUE", "ein-agent-queue")
-    alertmanager_url = os.getenv("ALERTMANAGER_URL")
+    model = os.getenv("EIN_AGENT_MODEL", DEFAULT_MODEL)
+
+    logger.info(f"Using LLM model: {model}")
 
     # Load MCP configuration from environment
     mcp_config = MCPConfig.from_env()
 
     # Get all registered MCP server providers
     mcp_providers = MCPProviderRegistry.get_all_providers(mcp_config)
-
-    # Create activities with injected config
-    fetch_alerts = create_fetch_alerts_activity(alertmanager_url)
 
     # Create Temporal client
     client = await Client.connect(
@@ -70,7 +71,7 @@ async def main():
             IncidentCorrelationWorkflow,
             HumanInTheLoopWorkflow,
         ],
-        activities=[load_mcp_config, fetch_alerts],  # Registered load_mcp_config
+        activities=[load_mcp_config, load_worker_model, fetch_alerts_activity],
     )
 
     logger.info("Worker started successfully on queue: %s", queue)
