@@ -1,10 +1,8 @@
 from datetime import timedelta
-from typing import Any, Optional, Dict, List
+from typing import Any, Optional, Dict, List, TYPE_CHECKING
 
 from agents import Agent, Runner, RunConfig
-from agents.extensions.models.litellm_provider import LitellmProvider
 from temporalio import workflow
-from ein_agent_worker.mcp_providers import MCPConfig, load_mcp_config
 from ein_agent_worker.models import InvestigationConfig, SharedContext
 from ein_agent_worker.workflows.agents.investigation_project_manager import (
     new_investigation_project_manager_agent,
@@ -12,18 +10,14 @@ from ein_agent_worker.workflows.agents.investigation_project_manager import (
 from ein_agent_worker.workflows.agents.single_alert_investigator import (
     new_single_alert_investigator_agent,
 )
-from ein_agent_worker.workflows.agents.specialists import (
-    DomainType,
-    new_specialist_agent,
-)
-from ein_agent_worker.workflows.agents.shared_context_tools import (
-    create_shared_context_tools,
-)
 from ein_agent_worker.workflows.utils import (
     format_alert_list,
     format_single_alert,
     log_investigation_path,
 )
+
+if TYPE_CHECKING:
+    from ein_agent_worker.mcp_providers import MCPConfig
 
 
 def _get_alert_identifier(alert: dict[str, Any], index: int) -> str:
@@ -47,7 +41,7 @@ class IncidentCorrelationWorkflow:
 
     def __init__(self):
         self.model: str = ""
-        self.mcp_config: Optional[MCPConfig] = None
+        self.mcp_config: "MCPConfig | None" = None
         self.run_config: Optional[RunConfig] = None
         self.shared_context: Optional[SharedContext] = None
         self.alerts: list[dict[str, Any]] = []
@@ -59,6 +53,10 @@ class IncidentCorrelationWorkflow:
         config: Optional[InvestigationConfig] = None,
     ) -> str:
         """Investigate alerts and produce incident report."""
+        # Import inside run to avoid sandbox issues
+        from agents.extensions.models.litellm_provider import LitellmProvider
+        from ein_agent_worker.mcp_providers import load_mcp_config
+
         config = config or InvestigationConfig()
         self.alerts = alerts
 
@@ -156,6 +154,15 @@ class IncidentCorrelationWorkflow:
         Returns:
             Tuple of (agents dict, investigator info list)
         """
+        # Import inside method to avoid sandbox issues
+        from ein_agent_worker.workflows.agents.specialists import (
+            DomainType,
+            new_specialist_agent,
+        )
+        from ein_agent_worker.workflows.agents.shared_context_tools import (
+            create_shared_context_tools,
+        )
+
         agents = {}
         available_mcp_servers = self._get_available_mcp_servers()
 

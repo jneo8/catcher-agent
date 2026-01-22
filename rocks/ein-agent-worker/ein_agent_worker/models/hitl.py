@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 class WorkflowStatus(str, Enum):
     """Workflow lifecycle states."""
-
+    
     PENDING = "pending"  # Created, waiting for first message
     RUNNING = "running"  # Agent processing / waiting for user
     COMPLETED = "completed"  # Investigation finished with report

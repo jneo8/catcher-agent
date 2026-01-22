@@ -9,12 +9,11 @@ A simple conversational workflow where:
 """
 
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
 from agents import Agent, Runner, RunConfig, function_tool
-from agents.extensions.models.litellm_provider import LitellmProvider
 from temporalio import workflow
 
-from ein_agent_worker.mcp_providers import MCPConfig, load_mcp_config
 from ein_agent_worker.models import (
     SharedContext,
     WorkflowStatus,
@@ -24,17 +23,14 @@ from ein_agent_worker.models import (
     WorkflowEvent,
     WorkflowEventType,
 )
-from ein_agent_worker.workflows.agents.specialists import (
-    DomainType,
-    new_specialist_agent,
-)
-from ein_agent_worker.workflows.agents.shared_context_tools import (
-    create_shared_context_tools,
-)
+
+if TYPE_CHECKING:
+    from ein_agent_worker.mcp_providers import MCPConfig
 
 # =============================================================================
 # Investigation Agent Prompt
 # =============================================================================
+# ... (Prompt string kept as is)
 INVESTIGATION_AGENT_PROMPT = """You are the Investigation Assistant (The Orchestrator).
 
 ## Your Capabilities
@@ -76,7 +72,7 @@ class HumanInTheLoopWorkflow:
         self._state = WorkflowState()
         self._shared_context = SharedContext()
         self._config = HITLConfig()
-        self._mcp_config: MCPConfig | None = None
+        self._mcp_config: "MCPConfig | None" = None
         self._run_config: RunConfig | None = None
         self._event_queue: list[WorkflowEvent] = []
         self._should_end = False
@@ -195,6 +191,10 @@ class HumanInTheLoopWorkflow:
         Returns:
             Final report or termination message
         """
+        # Import inside activity/workflow context to avoid sandbox issues
+        from agents.extensions.models.litellm_provider import LitellmProvider
+        from ein_agent_worker.mcp_providers import load_mcp_config
+
         if config:
             self._config = config
 
@@ -306,6 +306,14 @@ class HumanInTheLoopWorkflow:
 
     def _create_investigation_agent(self) -> Agent:
         """Create the investigation agent with specialists."""
+        from ein_agent_worker.workflows.agents.specialists import (
+            DomainType,
+            new_specialist_agent,
+        )
+        from ein_agent_worker.workflows.agents.shared_context_tools import (
+            create_shared_context_tools,
+        )
+
         available_mcp_servers = self._get_available_mcp_servers()
 
         # Create shared context tools for the Orchestrator
@@ -424,9 +432,6 @@ class HumanInTheLoopWorkflow:
         ) -> str:
             """Fetch alerts from Alertmanager."""
             workflow.logger.info(f"fetch_alerts called: status={status}, alertname={alertname}")
-
-            if not self._config.alertmanager_url:
-                return "Error: Alertmanager URL is not configured."
 
             params = {
                 "alertmanager_url": self._config.alertmanager_url,

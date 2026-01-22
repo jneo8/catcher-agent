@@ -12,6 +12,7 @@ from agents import Agent
 from temporalio.contrib import openai_agents
 
 from ein_agent_worker.workflows.mcp_config import get_mcp_activity_config
+from ein_agent_worker.workflows.agents.mcp_wrapper import SafeMCPServer
 
 
 class DomainType(str, Enum):
@@ -277,9 +278,11 @@ def new_specialist_agent(
 
     # Create MCP server references for Temporal
     mcp_servers = [
-        openai_agents.workflow.stateless_mcp_server(
-            server,
-            config=get_mcp_activity_config()
+        SafeMCPServer(
+            openai_agents.workflow.stateless_mcp_server(
+                server,
+                config=get_mcp_activity_config()
+            )
         )
         for server in relevant_servers
     ]
