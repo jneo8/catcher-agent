@@ -14,3 +14,7 @@ wheels/
 *.tar
 *.rock
 .env
+
+# Training Data
+training_data/logs/
+

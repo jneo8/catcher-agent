@@ -34,6 +34,8 @@ with workflow.unsafe.imports_passed_through():
     from ein_agent_worker.workflows.agents.shared_context_tools import (
         create_shared_context_tools,
     )
+    from ein_agent_worker.dspy_optimization import AgentInteraction, InteractionCollector
+    from ein_agent_worker.workflows.dspy_hooks import DSPyRecordingHooks
 
 # =============================================================================
 # Investigation Agent Prompt
@@ -82,6 +84,7 @@ class HumanInTheLoopWorkflow:
         self._config = HITLConfig()
         self._mcp_config: MCPConfig | None = None
         self._run_config: RunConfig | None = None
+        self._collector: InteractionCollector | None = None
         self._event_queue: list[WorkflowEvent] = []
         self._should_end = False
 
@@ -220,6 +223,10 @@ class HumanInTheLoopWorkflow:
 
         # Setup run config
         self._run_config = RunConfig(model_provider=GeminiCompatibleLitellmProvider())
+        self._collector = InteractionCollector()
+        
+        # Prepare hooks for recording
+        recording_hooks = DSPyRecordingHooks() if self._collector.enabled else None
 
         # Create the investigation agent
         agent = self._create_investigation_agent()
@@ -280,6 +287,8 @@ class HumanInTheLoopWorkflow:
                     input=conversation,
                     max_turns=30,
                     run_config=self._run_config,
+                    hooks=recording_hooks,
+                    context={"shared_context": self._shared_context},
                 )
 
                 response = result.final_output or "I encountered an issue processing your request."

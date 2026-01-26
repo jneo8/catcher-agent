@@ -13,6 +13,7 @@ from ein_agent_worker.models.hitl import DEFAULT_MODEL
 from ein_agent_worker.mcp_providers import MCPConfig, MCPProviderRegistry, load_mcp_config
 from ein_agent_worker.activities.alertmanager import fetch_alerts_activity
 from ein_agent_worker.activities.worker_config import load_worker_model
+from ein_agent_worker.activities.dspy_collection import record_interaction_activity
 from ein_agent_worker.workflows.incident_correlation_workflow import IncidentCorrelationWorkflow
 from ein_agent_worker.workflows.human_in_the_loop import HumanInTheLoopWorkflow
 # Note: No activities needed - agent orchestration happens in workflows now
@@ -71,12 +72,30 @@ async def main():
             IncidentCorrelationWorkflow,
             HumanInTheLoopWorkflow,
         ],
-        activities=[load_mcp_config, load_worker_model, fetch_alerts_activity],
+        activities=[load_mcp_config, load_worker_model, fetch_alerts_activity, record_interaction_activity],
     )
 
     logger.info("Worker started successfully on queue: %s", queue)
     await worker.run()
 
 
-if __name__ == "__main__":
+def main_entry():
+
+
+    """Entry point for the console script."""
+
+
     asyncio.run(main())
+
+
+
+
+
+
+
+
+if __name__ == "__main__":
+
+
+    main_entry()
+
