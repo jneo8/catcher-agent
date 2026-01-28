@@ -17,5 +17,13 @@ env:
   - name: MCP_GRAFANA_TRANSPORT
     value: sse
 
+  # Agent's model
+  - name: EIN_AGENT_MODEL
+    value: "gemini/gemini-3-flash-preview"
+
+  # Alertmanager Configuration
+  - name: ALERTMANAGER_URL
+    value: http://alertmanager.cos.svc.cluster.local:9093
+
 juju:
   - secret-id: d4nsqv7mp25c77vcjq90
