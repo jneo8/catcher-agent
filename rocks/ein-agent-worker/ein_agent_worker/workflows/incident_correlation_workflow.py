@@ -77,7 +77,10 @@ class IncidentCorrelationWorkflow:
         workflow.logger.info(f"Using model: {self.model}")
 
         # Initialize
-        self.run_config = RunConfig(model_provider=GeminiCompatibleLitellmProvider())
+        self.run_config = RunConfig(
+            model_provider=GeminiCompatibleLitellmProvider(),
+            tracing_disabled=True,
+        )
         self.shared_context = SharedContext()
 
         self.mcp_config = await workflow.execute_activity(

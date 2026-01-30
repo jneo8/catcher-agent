@@ -219,7 +219,10 @@ class HumanInTheLoopWorkflow:
         )
 
         # Setup run config
-        self._run_config = RunConfig(model_provider=GeminiCompatibleLitellmProvider())
+        self._run_config = RunConfig(
+            model_provider=GeminiCompatibleLitellmProvider(),
+            tracing_disabled=True,
+        )
 
         # Create the investigation agent
         agent = self._create_investigation_agent()
