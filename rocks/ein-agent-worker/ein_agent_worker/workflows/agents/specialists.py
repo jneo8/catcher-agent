@@ -2,12 +2,12 @@
 
 Architecture:
 - Domain experts are specialized for specific infrastructure domains
-- Each domain expert receives tools relevant to their domain
+- Each domain expert receives UTCP tools relevant to their domain
 - Example: StorageSpecialist receives ceph tools, kubernetes tools (for PVCs)
 """
 
 from enum import Enum
-from typing import List, Callable, Optional
+from typing import List, Callable, Optional, Set
 from agents import Agent
 
 
@@ -16,6 +16,17 @@ class DomainType(str, Enum):
     COMPUTE = "compute"
     STORAGE = "storage"
     NETWORK = "network"
+
+
+# =============================================================================
+# Domain to UTCP Services Mapping
+# =============================================================================
+# Which UTCP services are relevant for each domain
+DOMAIN_UTCP_SERVICES: dict[DomainType, Set[str]] = {
+    DomainType.COMPUTE: {"kubernetes", "grafana"},
+    DomainType.STORAGE: {"ceph", "kubernetes"},  # kubernetes for PVC access
+    DomainType.NETWORK: {"kubernetes"},
+}
 
 
 # =============================================================================
@@ -33,8 +44,8 @@ Call `get_shared_context('node:')` or `get_shared_context('pod:')` to see if rel
 - If a node issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
-### STEP 2: INVESTIGATE WITH MCP TOOLS
-Use kubernetes/grafana MCP tools to investigate:
+### STEP 2: INVESTIGATE WITH UTCP TOOLS
+Use the UTCP tools to investigate (search_kubernetes_operations, call_kubernetes_operation):
 - Pod status, events, logs
 - Node conditions (Ready, MemoryPressure, DiskPressure)
 - Resource usage (CPU, memory)
@@ -87,8 +98,8 @@ Call `get_shared_context('osd:')` or `get_shared_context('pvc:')` to see if rela
 - If an OSD/pool issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
-### STEP 2: INVESTIGATE WITH MCP TOOLS
-Use ceph/kubernetes/grafana MCP tools to investigate:
+### STEP 2: INVESTIGATE WITH UTCP TOOLS
+Use the UTCP tools to investigate (search_ceph_operations, call_ceph_operation, etc.):
 - Ceph cluster health (HEALTH_OK/WARN/ERR)
 - OSD status (down, out, full, slow)
 - PG status (degraded, undersized, stuck)
@@ -148,8 +159,8 @@ Call `get_shared_context('service:')` or `get_shared_context('dns:')` to see if 
 - If a network issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
-### STEP 2: INVESTIGATE WITH MCP TOOLS
-Use kubernetes/grafana MCP tools to investigate:
+### STEP 2: INVESTIGATE WITH UTCP TOOLS
+Use the UTCP tools to investigate (search_kubernetes_operations, call_kubernetes_operation):
 - Service endpoints and port mappings
 - CoreDNS health and DNS resolution
 - Ingress controller status and routing

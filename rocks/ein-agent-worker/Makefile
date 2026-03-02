@@ -48,6 +48,42 @@ port-forward-temporal-server:  ## Run kubectl port-forward to access temporal ui
 create-default-namespace:  ## Create default namespace on temporal
 	 juju run temporal-admin-k8s/0 cli args="operator namespace create --namespace default --retention 3d" --wait 1m
 
+##@ OpenAPI Specs
+
+SPECS_DIR := specs
+
+# Default versions (can be overridden: make download-k8s-spec K8S_VERSION=1.34)
+K8S_VERSION ?= 1.35
+CEPH_VERSION ?= tentacle
+GRAFANA_VERSION ?= 12
+
+# Source URL templates
+K8S_OPENAPI_URL = https://raw.githubusercontent.com/kubernetes/kubernetes/release-$(K8S_VERSION)/api/openapi-spec/swagger.json
+CEPH_OPENAPI_URL = https://raw.githubusercontent.com/ceph/ceph/$(CEPH_VERSION)/src/pybind/mgr/dashboard/openapi.yaml
+GRAFANA_OPENAPI_URL = https://raw.githubusercontent.com/grafana/grafana/v$(GRAFANA_VERSION).0.0/public/api-merged.json
+
+.PHONY: download-openapi-specs
+download-openapi-specs: download-k8s-spec download-ceph-spec download-grafana-spec  ## Download all OpenAPI specs
+	@echo "All OpenAPI specs downloaded to $(SPECS_DIR)/"
+
+.PHONY: download-k8s-spec
+download-k8s-spec:  ## Download Kubernetes OpenAPI spec (K8S_VERSION=1.35)
+	@mkdir -p $(SPECS_DIR)/kubernetes
+	@echo "Downloading Kubernetes $(K8S_VERSION) OpenAPI spec..."
+	curl -L -o $(SPECS_DIR)/kubernetes/$(K8S_VERSION).json $(K8S_OPENAPI_URL)
+
+.PHONY: download-ceph-spec
+download-ceph-spec:  ## Download Ceph OpenAPI spec (CEPH_VERSION=tentacle)
+	@mkdir -p $(SPECS_DIR)/ceph
+	@echo "Downloading Ceph $(CEPH_VERSION) OpenAPI spec..."
+	curl -L -o $(SPECS_DIR)/ceph/$(CEPH_VERSION).yaml $(CEPH_OPENAPI_URL)
+
+.PHONY: download-grafana-spec
+download-grafana-spec:  ## Download Grafana OpenAPI spec (GRAFANA_VERSION=12)
+	@mkdir -p $(SPECS_DIR)/grafana
+	@echo "Downloading Grafana v$(GRAFANA_VERSION) OpenAPI spec..."
+	curl -L -o $(SPECS_DIR)/grafana/$(GRAFANA_VERSION).json $(GRAFANA_OPENAPI_URL)
+
 ##@ Help
 
 .PHONY: help

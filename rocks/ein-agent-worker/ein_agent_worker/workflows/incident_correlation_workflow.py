@@ -20,14 +20,17 @@ from ein_agent_worker.workflows.utils import (
 
 with workflow.unsafe.imports_passed_through():
     from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
-    from ein_agent_worker.activities.worker_config import load_worker_model
+    from ein_agent_worker.activities.worker_config import load_worker_model, load_utcp_config
     from ein_agent_worker.workflows.agents.specialists import (
         DomainType,
         new_specialist_agent,
+        DOMAIN_UTCP_SERVICES,
     )
     from ein_agent_worker.workflows.agents.shared_context_tools import (
         create_shared_context_tools,
     )
+    from ein_agent_worker.utcp import create_utcp_tools
+    from ein_agent_worker.utcp.loader import ToolLoader
 
 
 def _get_alert_identifier(alert: dict[str, Any], index: int) -> str:
@@ -54,6 +57,57 @@ class IncidentCorrelationWorkflow:
         self.run_config: Optional[RunConfig] = None
         self.shared_context: Optional[SharedContext] = None
         self.alerts: list[dict[str, Any]] = []
+        self._utcp_tools: dict[str, list] = {}  # service_name -> tools
+
+    async def _initialize_utcp_tools(self) -> None:
+        """Initialize UTCP tools for all configured services.
+
+        Loads UTCP config from environment via activity, creates clients,
+        and generates tools for each enabled service.
+        """
+        # Load UTCP config via activity
+        utcp_services = await workflow.execute_activity(
+            load_utcp_config,
+            start_to_close_timeout=timedelta(seconds=30),
+        )
+
+        if not utcp_services:
+            workflow.logger.info("No UTCP services configured")
+            return
+
+        workflow.logger.info(f"Initializing UTCP tools for {len(utcp_services)} service(s)")
+
+        # Create tool loader
+        loader = ToolLoader()
+
+        for svc in utcp_services:
+            service_name = svc["name"]
+            openapi_url = svc["openapi_url"]
+
+            try:
+                # Create UTCP client for this service
+                client = await loader.create_client(service_name, openapi_url)
+
+                # Generate tools for this service
+                tools = loader.load_service_tools(client, service_name)
+                self._utcp_tools[service_name] = tools
+
+                workflow.logger.info(
+                    f"Loaded {len(tools)} UTCP tools for {service_name}"
+                )
+            except Exception as e:
+                workflow.logger.error(
+                    f"Failed to initialize UTCP tools for {service_name}: {e}"
+                )
+
+    def _get_domain_utcp_tools(self, domain: DomainType) -> list:
+        """Get UTCP tools for a specific domain."""
+        tools = []
+        services = DOMAIN_UTCP_SERVICES.get(domain, set())
+        for service in services:
+            if service in self._utcp_tools:
+                tools.extend(self._utcp_tools[service])
+        return tools
 
     @workflow.run
     async def run(
@@ -80,6 +134,9 @@ class IncidentCorrelationWorkflow:
             tracing_disabled=True,
         )
         self.shared_context = SharedContext()
+
+        # Initialize UTCP tools
+        await self._initialize_utcp_tools()
 
         # Initialize Agents (PM gets handoffs to Investigators)
         agents, investigator_info = self._create_agents()
@@ -159,7 +216,7 @@ class IncidentCorrelationWorkflow:
         """
         agents = {}
 
-        # 1. Create Domain Specialists
+        # 1. Create Domain Specialists with UTCP tools
         specialists = {}
         for domain in DomainType:
             update_tool, get_tool, print_report_tool, group_findings_tool = create_shared_context_tools(
@@ -167,10 +224,13 @@ class IncidentCorrelationWorkflow:
                 agent_name=f"{domain.value.title()}Specialist"
             )
 
+            # Get UTCP tools for this domain
+            domain_utcp_tools = self._get_domain_utcp_tools(domain)
+
             agent = new_specialist_agent(
                 domain=domain,
                 model=self.model,
-                tools=[update_tool, get_tool, print_report_tool, group_findings_tool],
+                tools=[update_tool, get_tool, print_report_tool, group_findings_tool] + domain_utcp_tools,
             )
             specialists[agent.name] = agent
             agents[agent.name] = agent

@@ -5,10 +5,42 @@ allowing workflows to access worker-side settings.
 """
 
 import os
+from typing import Any
 
 from temporalio import activity
 
 from ein_agent_worker.models.hitl import DEFAULT_MODEL
+from ein_agent_worker.utcp.config import UTCPConfig
+
+
+@activity.defn
+async def load_utcp_config() -> list[dict[str, Any]]:
+    """Load UTCP service configurations from environment.
+
+    Returns:
+        List of service config dicts with keys:
+        - name: Service name
+        - openapi_url: URL to OpenAPI spec
+        - auth_type: Authentication type
+        - enabled: Whether service is enabled
+        - version: Spec version
+        - dynamic: Whether to generate tools dynamically
+    """
+    config = UTCPConfig.from_env()
+    services = []
+
+    for svc in config.enabled_services:
+        services.append({
+            "name": svc.name,
+            "openapi_url": svc.openapi_url,
+            "auth_type": svc.auth_type,
+            "enabled": svc.enabled,
+            "version": svc.version,
+            "dynamic": svc.dynamic,
+        })
+
+    activity.logger.info(f"Loaded {len(services)} UTCP service(s): {[s['name'] for s in services]}")
+    return services
 
 
 @activity.defn

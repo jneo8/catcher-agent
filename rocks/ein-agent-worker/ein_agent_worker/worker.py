@@ -11,7 +11,7 @@ from temporalio.worker import Worker
 from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
 from ein_agent_worker.models.hitl import DEFAULT_MODEL
 from ein_agent_worker.activities.alertmanager import fetch_alerts_activity
-from ein_agent_worker.activities.worker_config import load_worker_model
+from ein_agent_worker.activities.worker_config import load_worker_model, load_utcp_config
 from ein_agent_worker.workflows.incident_correlation_workflow import IncidentCorrelationWorkflow
 from ein_agent_worker.workflows.human_in_the_loop import HumanInTheLoopWorkflow
 from temporalio.contrib.openai_agents import OpenAIAgentsPlugin, ModelActivityParameters
@@ -59,7 +59,7 @@ async def main():
             IncidentCorrelationWorkflow,
             HumanInTheLoopWorkflow,
         ],
-        activities=[load_worker_model, fetch_alerts_activity],
+        activities=[load_worker_model, load_utcp_config, fetch_alerts_activity],
     )
 
     logger.info("Worker started successfully on queue: %s", queue)

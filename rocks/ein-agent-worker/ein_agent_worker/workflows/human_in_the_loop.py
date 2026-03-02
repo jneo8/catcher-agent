@@ -3,7 +3,7 @@
 A simple conversational workflow where:
 - User converses with an investigation agent
 - Agent has tools to fetch alerts from Alertmanager
-- Agent can investigate alerts using MCP tools (Kubernetes, Grafana, etc.)
+- Agent can investigate infrastructure using UTCP tools (Kubernetes, Grafana, Ceph)
 - Agent asks for clarification naturally when needed via ask_user tool
 - Agent can hand off to domain specialists for deep technical analysis
 """
@@ -25,14 +25,17 @@ from ein_agent_worker.models import (
 
 with workflow.unsafe.imports_passed_through():
     from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
-    from ein_agent_worker.activities.worker_config import load_worker_model
+    from ein_agent_worker.activities.worker_config import load_worker_model, load_utcp_config
     from ein_agent_worker.workflows.agents.specialists import (
         DomainType,
         new_specialist_agent,
+        DOMAIN_UTCP_SERVICES,
     )
     from ein_agent_worker.workflows.agents.shared_context_tools import (
         create_shared_context_tools,
     )
+    from ein_agent_worker.utcp import create_utcp_tools
+    from ein_agent_worker.utcp.loader import ToolLoader
 
 # =============================================================================
 # Investigation Agent Prompt
@@ -63,7 +66,7 @@ INVESTIGATION_AGENT_PROMPT = """You are the Investigation Assistant (The Orchest
 ## CRITICAL RULES
 - **ASK FIRST**: Do NOT hand off to a specialist without asking the user first.
 - **HANDOFFS**: Use the standard transfer tools to delegate (e.g., `transfer_to_computespecialist`).
-- **NO DIRECT MCP**: You do not have direct access to MCP tools. Delegate to specialists.
+- **NO DIRECT UTCP**: You do not have direct access to UTCP tools. Delegate to specialists.
 - **OUTPUTTING REPORTS**: Always output the content of `print_findings_report` to the user.
 """
 
@@ -82,6 +85,7 @@ class HumanInTheLoopWorkflow:
         self._run_config: RunConfig | None = None
         self._event_queue: list[WorkflowEvent] = []
         self._should_end = False
+        self._utcp_tools: dict[str, list] = {}  # service_name -> tools
 
     # =========================================================================
     # Signals (user sends messages)
@@ -216,6 +220,9 @@ class HumanInTheLoopWorkflow:
             tracing_disabled=True,
         )
 
+        # Initialize UTCP tools
+        await self._initialize_utcp_tools()
+
         # Create the investigation agent
         agent = self._create_investigation_agent()
 
@@ -310,6 +317,63 @@ class HumanInTheLoopWorkflow:
     # Agent Creation
     # =========================================================================
 
+    async def _initialize_utcp_tools(self) -> None:
+        """Initialize UTCP tools for all configured services.
+
+        Loads UTCP config from environment via activity, creates clients,
+        and generates tools for each enabled service.
+        """
+        # Load UTCP config via activity
+        utcp_services = await workflow.execute_activity(
+            load_utcp_config,
+            start_to_close_timeout=timedelta(seconds=30),
+        )
+
+        if not utcp_services:
+            workflow.logger.info("No UTCP services configured")
+            return
+
+        workflow.logger.info(f"Initializing UTCP tools for {len(utcp_services)} service(s)")
+
+        # Create tool loader
+        loader = ToolLoader()
+
+        for svc in utcp_services:
+            service_name = svc["name"]
+            openapi_url = svc["openapi_url"]
+
+            try:
+                # Create UTCP client for this service
+                client = await loader.create_client(service_name, openapi_url)
+
+                # Generate tools for this service
+                tools = loader.load_service_tools(client, service_name)
+                self._utcp_tools[service_name] = tools
+
+                workflow.logger.info(
+                    f"Loaded {len(tools)} UTCP tools for {service_name}"
+                )
+            except Exception as e:
+                workflow.logger.error(
+                    f"Failed to initialize UTCP tools for {service_name}: {e}"
+                )
+
+    def _get_domain_utcp_tools(self, domain: DomainType) -> list:
+        """Get UTCP tools for a specific domain.
+
+        Args:
+            domain: The domain type
+
+        Returns:
+            List of UTCP tools for the domain's services
+        """
+        tools = []
+        services = DOMAIN_UTCP_SERVICES.get(domain, set())
+        for service in services:
+            if service in self._utcp_tools:
+                tools.extend(self._utcp_tools[service])
+        return tools
+
     def _create_investigation_agent(self) -> Agent:
         """Create the investigation agent with specialists."""
         # Create shared context tools for the Orchestrator
@@ -317,34 +381,37 @@ class HumanInTheLoopWorkflow:
             self._shared_context, agent_name="InvestigationAgent"
         )
 
-        # Create tools for ComputeSpecialist
+        # Create tools for ComputeSpecialist (shared context + UTCP tools)
         comp_update, comp_get, comp_print, comp_group = create_shared_context_tools(
             self._shared_context, agent_name="ComputeSpecialist"
         )
+        compute_utcp_tools = self._get_domain_utcp_tools(DomainType.COMPUTE)
         compute_spec = new_specialist_agent(
             domain=DomainType.COMPUTE,
             model=self._config.model,
-            tools=[comp_update, comp_get, comp_print, comp_group],
+            tools=[comp_update, comp_get, comp_print, comp_group] + compute_utcp_tools,
         )
 
-        # Create tools for StorageSpecialist
+        # Create tools for StorageSpecialist (shared context + UTCP tools)
         stor_update, stor_get, stor_print, stor_group = create_shared_context_tools(
             self._shared_context, agent_name="StorageSpecialist"
         )
+        storage_utcp_tools = self._get_domain_utcp_tools(DomainType.STORAGE)
         storage_spec = new_specialist_agent(
             domain=DomainType.STORAGE,
             model=self._config.model,
-            tools=[stor_update, stor_get, stor_print, stor_group],
+            tools=[stor_update, stor_get, stor_print, stor_group] + storage_utcp_tools,
         )
 
-        # Create tools for NetworkSpecialist
+        # Create tools for NetworkSpecialist (shared context + UTCP tools)
         net_update, net_get, net_print, net_group = create_shared_context_tools(
             self._shared_context, agent_name="NetworkSpecialist"
         )
+        network_utcp_tools = self._get_domain_utcp_tools(DomainType.NETWORK)
         network_spec = new_specialist_agent(
             domain=DomainType.NETWORK,
             model=self._config.model,
-            tools=[net_update, net_get, net_print, net_group],
+            tools=[net_update, net_get, net_print, net_group] + network_utcp_tools,
         )
 
         # Create tools
