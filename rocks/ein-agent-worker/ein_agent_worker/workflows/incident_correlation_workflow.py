@@ -20,7 +20,6 @@ from ein_agent_worker.workflows.utils import (
 
 with workflow.unsafe.imports_passed_through():
     from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
-    from ein_agent_worker.mcp_providers import MCPConfig, load_mcp_config
     from ein_agent_worker.activities.worker_config import load_worker_model
     from ein_agent_worker.workflows.agents.specialists import (
         DomainType,
@@ -52,7 +51,6 @@ class IncidentCorrelationWorkflow:
 
     def __init__(self):
         self.model: str = ""
-        self.mcp_config: MCPConfig | None = None
         self.run_config: Optional[RunConfig] = None
         self.shared_context: Optional[SharedContext] = None
         self.alerts: list[dict[str, Any]] = []
@@ -82,11 +80,6 @@ class IncidentCorrelationWorkflow:
             tracing_disabled=True,
         )
         self.shared_context = SharedContext()
-
-        self.mcp_config = await workflow.execute_activity(
-            load_mcp_config,
-            start_to_close_timeout=timedelta(seconds=10),
-        )
 
         # Initialize Agents (PM gets handoffs to Investigators)
         agents, investigator_info = self._create_agents()
@@ -158,10 +151,6 @@ class IncidentCorrelationWorkflow:
             return f"--- INITIAL REPORT FROM {investigator.name} ---\n(Investigation Failed: {e})"
 
 
-    def _get_available_mcp_servers(self) -> List[str]:
-        """Get list of available MCP server names."""
-        return [server.name for server in self.mcp_config.enabled_servers]
-
     def _create_agents(self) -> tuple[Dict[str, Agent], List[Dict[str, str]]]:
         """Create the full agent swarm with one investigator per alert.
 
@@ -169,7 +158,6 @@ class IncidentCorrelationWorkflow:
             Tuple of (agents dict, investigator info list)
         """
         agents = {}
-        available_mcp_servers = self._get_available_mcp_servers()
 
         # 1. Create Domain Specialists
         specialists = {}
@@ -182,7 +170,6 @@ class IncidentCorrelationWorkflow:
             agent = new_specialist_agent(
                 domain=domain,
                 model=self.model,
-                available_mcp_servers=available_mcp_servers,
                 tools=[update_tool, get_tool, print_report_tool, group_findings_tool],
             )
             specialists[agent.name] = agent

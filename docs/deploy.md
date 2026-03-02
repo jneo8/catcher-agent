@@ -134,6 +134,16 @@ juju:
   secret-id: <secret_id1>
 ```
 
+## Offline/Air-gapped Deployment
+
+When deploying in restricted network environments, the worker may fail to connect to `openaipublic.blob.core.windows.net`. This is caused by **tiktoken** (the tokenizer library used by LiteLLM) attempting to download encoding files.
+
+To disable tiktoken network requests, set the following environment variable:
+
+```yaml
+TIKTOKEN_CACHE_DIR: ""
+```
+
 ## Using Ein-Agent-CLI
 
 The `ein-agent-cli` is a command-line tool for querying Alertmanager and triggering incident correlation workflows in Temporal.

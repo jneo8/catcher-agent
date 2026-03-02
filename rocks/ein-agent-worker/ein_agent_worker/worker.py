@@ -10,13 +10,10 @@ from temporalio.worker import Worker
 
 from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
 from ein_agent_worker.models.hitl import DEFAULT_MODEL
-from ein_agent_worker.mcp_providers import MCPConfig, MCPProviderRegistry, load_mcp_config
 from ein_agent_worker.activities.alertmanager import fetch_alerts_activity
 from ein_agent_worker.activities.worker_config import load_worker_model
 from ein_agent_worker.workflows.incident_correlation_workflow import IncidentCorrelationWorkflow
 from ein_agent_worker.workflows.human_in_the_loop import HumanInTheLoopWorkflow
-# Note: No activities needed - agent orchestration happens in workflows now
-# MCP operations are handled by the OpenAIAgentsPlugin via stateless_mcp_server()
 from temporalio.contrib.openai_agents import OpenAIAgentsPlugin, ModelActivityParameters
 
 logging.basicConfig(level=logging.INFO)
@@ -32,12 +29,6 @@ async def main():
     model = os.getenv("EIN_AGENT_MODEL", DEFAULT_MODEL)
 
     logger.info(f"Using LLM model: {model}")
-
-    # Load MCP configuration from environment
-    mcp_config = MCPConfig.from_env()
-
-    # Get all registered MCP server providers
-    mcp_providers = MCPProviderRegistry.get_all_providers(mcp_config)
 
     # Create Temporal client
     client = await Client.connect(
@@ -56,14 +47,11 @@ async def main():
                 ),
                 # Use Gemini-compatible provider that handles message ordering
                 model_provider=GeminiCompatibleLitellmProvider(),
-                mcp_server_providers=mcp_providers,
             )
         ],
     )
 
     # Create worker
-    # Note: No custom activities needed - agent orchestration happens in workflows
-    # MCP operations are handled automatically by OpenAIAgentsPlugin
     worker = Worker(
         client,
         task_queue=queue,
@@ -71,7 +59,7 @@ async def main():
             IncidentCorrelationWorkflow,
             HumanInTheLoopWorkflow,
         ],
-        activities=[load_mcp_config, load_worker_model, fetch_alerts_activity],
+        activities=[load_worker_model, fetch_alerts_activity],
     )
 
     logger.info("Worker started successfully on queue: %s", queue)

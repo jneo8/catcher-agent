@@ -1,18 +1,14 @@
 """Domain Specialist agents - Technical Experts for specific infrastructure domains.
 
 Architecture:
-- Domain experts are NOT 1:1 mapped to MCP servers
-- Each domain expert can access MULTIPLE MCP servers relevant to their domain
-- Example: StorageSpecialist can access ceph MCP, kubernetes MCP (for PVCs), grafana MCP
+- Domain experts are specialized for specific infrastructure domains
+- Each domain expert receives tools relevant to their domain
+- Example: StorageSpecialist receives ceph tools, kubernetes tools (for PVCs)
 """
 
 from enum import Enum
-from typing import List, Callable, Optional, Set
+from typing import List, Callable, Optional
 from agents import Agent
-from temporalio.contrib import openai_agents
-
-from ein_agent_worker.workflows.mcp_config import get_mcp_activity_config
-from ein_agent_worker.workflows.agents.mcp_wrapper import SafeMCPServer
 
 
 class DomainType(str, Enum):
@@ -20,17 +16,6 @@ class DomainType(str, Enum):
     COMPUTE = "compute"
     STORAGE = "storage"
     NETWORK = "network"
-
-
-# =============================================================================
-# MCP Server to Domain Mapping
-# =============================================================================
-# Which MCP servers are relevant for each domain
-DOMAIN_MCP_MAPPING: dict[DomainType, Set[str]] = {
-    DomainType.COMPUTE: {"kubernetes", "grafana"},
-    DomainType.STORAGE: {"ceph"},
-    DomainType.NETWORK: {"kubernetes"},
-}
 
 
 # =============================================================================
@@ -225,38 +210,9 @@ DOMAIN_NAMES: dict[DomainType, str] = {
 }
 
 
-def get_relevant_mcp_servers(
-    domain: DomainType,
-    available_mcp_servers: List[str]
-) -> List[str]:
-    """Get the MCP servers relevant for a domain that are also available.
-
-    Uses keyword matching to identify relevant servers (e.g., 'ceph' keyword
-    matches 'ceph-mcp' or 'my-ceph-server').
-
-    Args:
-        domain: The domain type
-        available_mcp_servers: List of MCP server names that are configured
-
-    Returns:
-        List of MCP server names that are both relevant and available
-    """
-    relevant_keywords = DOMAIN_MCP_MAPPING.get(domain, set())
-    
-    matched_servers = []
-    for available_server in available_mcp_servers:
-        available_lower = available_server.lower()
-        for keyword in relevant_keywords:
-            if keyword.lower() in available_lower:
-                matched_servers.append(available_server)
-                break
-    return matched_servers
-
-
 def new_specialist_agent(
     domain: DomainType,
     model: str,
-    available_mcp_servers: List[str],
     tools: Optional[List[Callable]] = None
 ) -> Agent:
     """Create a new domain specialist agent.
@@ -264,33 +220,17 @@ def new_specialist_agent(
     Args:
         domain: The domain type (COMPUTE, STORAGE, NETWORK)
         model: LLM model to use
-        available_mcp_servers: List of all available MCP server names
-        tools: Optional list of tools (e.g., shared context tools)
+        tools: Optional list of tools (e.g., shared context tools, UTCP tools)
 
     Returns:
-        Configured specialist Agent with access to relevant MCP servers
+        Configured specialist Agent
     """
     name = DOMAIN_NAMES[domain]
     instructions = DOMAIN_INSTRUCTIONS[domain]
-
-    # Get MCP servers relevant to this domain
-    relevant_servers = get_relevant_mcp_servers(domain, available_mcp_servers)
-
-    # Create MCP server references for Temporal
-    mcp_servers = [
-        SafeMCPServer(
-            openai_agents.workflow.stateless_mcp_server(
-                server,
-                config=get_mcp_activity_config()
-            )
-        )
-        for server in relevant_servers
-    ]
 
     return Agent(
         name=name,
         instructions=instructions,
         model=model,
         tools=tools or [],
-        mcp_servers=mcp_servers,
     )

@@ -25,7 +25,6 @@ from ein_agent_worker.models import (
 
 with workflow.unsafe.imports_passed_through():
     from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
-    from ein_agent_worker.mcp_providers import MCPConfig, load_mcp_config
     from ein_agent_worker.activities.worker_config import load_worker_model
     from ein_agent_worker.workflows.agents.specialists import (
         DomainType,
@@ -80,7 +79,6 @@ class HumanInTheLoopWorkflow:
         self._state = WorkflowState()
         self._shared_context = SharedContext()
         self._config = HITLConfig()
-        self._mcp_config: MCPConfig | None = None
         self._run_config: RunConfig | None = None
         self._event_queue: list[WorkflowEvent] = []
         self._should_end = False
@@ -212,12 +210,6 @@ class HumanInTheLoopWorkflow:
         )
         workflow.logger.info(f"Using model: {self._config.model}")
 
-        # Load MCP configuration
-        self._mcp_config = await workflow.execute_activity(
-            load_mcp_config,
-            start_to_close_timeout=timedelta(seconds=10),
-        )
-
         # Setup run config
         self._run_config = RunConfig(
             model_provider=GeminiCompatibleLitellmProvider(),
@@ -320,8 +312,6 @@ class HumanInTheLoopWorkflow:
 
     def _create_investigation_agent(self) -> Agent:
         """Create the investigation agent with specialists."""
-        available_mcp_servers = self._get_available_mcp_servers()
-
         # Create shared context tools for the Orchestrator
         update_tool, get_tool, print_report_tool, group_tool = create_shared_context_tools(
             self._shared_context, agent_name="InvestigationAgent"
@@ -334,7 +324,6 @@ class HumanInTheLoopWorkflow:
         compute_spec = new_specialist_agent(
             domain=DomainType.COMPUTE,
             model=self._config.model,
-            available_mcp_servers=available_mcp_servers,
             tools=[comp_update, comp_get, comp_print, comp_group],
         )
 
@@ -345,7 +334,6 @@ class HumanInTheLoopWorkflow:
         storage_spec = new_specialist_agent(
             domain=DomainType.STORAGE,
             model=self._config.model,
-            available_mcp_servers=available_mcp_servers,
             tools=[stor_update, stor_get, stor_print, stor_group],
         )
 
@@ -356,7 +344,6 @@ class HumanInTheLoopWorkflow:
         network_spec = new_specialist_agent(
             domain=DomainType.NETWORK,
             model=self._config.model,
-            available_mcp_servers=available_mcp_servers,
             tools=[net_update, net_get, net_print, net_group],
         )
 
@@ -386,12 +373,6 @@ class HumanInTheLoopWorkflow:
         network_spec.handoffs = [agent]
 
         return agent
-
-    def _get_available_mcp_servers(self) -> list[str]:
-        """Get list of available MCP server names."""
-        if not self._mcp_config:
-            return []
-        return [server.name for server in self._mcp_config.enabled_servers]
 
     # =========================================================================
     # Tool Creation
