@@ -9,7 +9,7 @@ export GEMINI_API_KEY="${GEMINI_API_KEY:-your-gemini-api-key-here}"
 # =============================================================================
 # See CLAUDE.md for instructions on setting up Kubernetes ServiceAccount and token
 
-export UTCP_SERVICES="kubernetes"
+export UTCP_SERVICES="kubernetes,grafana"
 
 # Kubernetes UTCP Configuration (direct API access with bearer token)
 # To get these values, run: make setup-k8s-token (or see CLAUDE.md)
@@ -19,6 +19,14 @@ export UTCP_KUBERNETES_TOKEN="${UTCP_KUBERNETES_TOKEN:-your-kubernetes-token-her
 export UTCP_KUBERNETES_INSECURE="true"
 export UTCP_KUBERNETES_ENABLED="true"
 export UTCP_KUBERNETES_VERSION="1.35"
+
+# Grafana UTCP Configuration (aggregated API server)
+export UTCP_GRAFANA_OPENAPI_URL="${UTCP_GRAFANA_OPENAPI_URL:-https://your-grafana-server/openapi/v2}"
+export UTCP_GRAFANA_AUTH_TYPE="bearer"
+export UTCP_GRAFANA_TOKEN="${UTCP_GRAFANA_TOKEN:-your-grafana-token-here}"
+export UTCP_GRAFANA_INSECURE="true"
+export UTCP_GRAFANA_ENABLED="true"
+export UTCP_GRAFANA_VERSION="12"
 
 # =============================================================================
 # Temporal Configuration

@@ -12,34 +12,43 @@
 
 Follow the instruction on official document to deploy cos-lite: https://charmhub.io/cos-lite.
 
-### Configuring Storage for COS-lite Components
+### Configuring Storage and Channels for COS-lite
 
-To require more storage for Prometheus, Loki, and Alertmanager, you can use an overlay file during deployment. Create a `cos-storage-overlay.yaml` file with the desired storage configurations:
+To configure storage for Prometheus, Loki, and Alertmanager, and set the channels for all COS components, use an overlay file during deployment. Create a `cos-lite-overlay.yaml` file:
 
 ```yaml
 bundle: kubernetes
 applications:
-  prometheus:
+  alertmanager:
+    channel: 2/stable
     storage:
-      database: 10G
+      data: 2G
+  catalogue:
+    channel: 2/stable
+  grafana:
+    channel: 2/stable
   loki:
+    channel: 2/stable
     storage:
       # This stores the index (metadata)
       active-index-directory: 2G
       # This stores the actual log data (chunks)
       loki-chunks: 10G
-  alertmanager:
+  prometheus:
+    channel: 2/stable
     storage:
-      data: 2G
+      database: 10G
 ```
 
 Then, deploy `cos-lite` using the overlay file:
 
 ```bash
-juju deploy cos-lite --trust --overlay @./cos-storage-overlay.yaml
+juju deploy cos-lite --trust --overlay @./cos-lite-overlay.yaml
 ```
 
-This will deploy `cos-lite` with the specified storage requirements for its components.
+This will deploy `cos-lite` with:
+- All components (alertmanager, catalogue, grafana, loki, prometheus) from the `2/stable` channel
+- Specified storage requirements for Prometheus, Loki, and Alertmanager
 
 ## Deploy Temporal Server
 
@@ -145,9 +154,9 @@ env:
 
   # Grafana
   - name: UTCP_GRAFANA_OPENAPI_URL
-    value: http://grafana.cos.svc.cluster.local:3000/api/swagger.json
+    value: http://grafana.cos.svc.cluster.local:3000/openapi/v2
   - name: UTCP_GRAFANA_AUTH_TYPE
-    value: api_key
+    value: bearer
   - name: UTCP_GRAFANA_VERSION
     value: "12"  # Optional: uses local spec file if available
 

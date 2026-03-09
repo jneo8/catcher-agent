@@ -49,10 +49,24 @@ Configure all required environment variables:
 export GEMINI_API_KEY="your-api-key"
 export EIN_AGENT_MODEL="gemini/gemini-3-flash-preview"
 
+# UTCP Service Configuration
+export UTCP_SERVICES="kubernetes,grafana"
+
 # Kubernetes UTCP Configuration
 export UTCP_KUBERNETES_OPENAPI_URL="https://<K8S_SERVER>:6443/openapi/v2"
+export UTCP_KUBERNETES_AUTH_TYPE="bearer"
 export UTCP_KUBERNETES_TOKEN="<token from kubectl create token>"
 export UTCP_KUBERNETES_INSECURE="true"  # For self-signed certificates
+export UTCP_KUBERNETES_ENABLED="true"
+export UTCP_KUBERNETES_VERSION="1.35"
+
+# Grafana UTCP Configuration (aggregated API server)
+export UTCP_GRAFANA_OPENAPI_URL="https://<GRAFANA_SERVER>/openapi/v2"
+export UTCP_GRAFANA_AUTH_TYPE="bearer"
+export UTCP_GRAFANA_TOKEN="<grafana service account token>"
+export UTCP_GRAFANA_INSECURE="true"  # For self-signed certificates
+export UTCP_GRAFANA_ENABLED="true"
+export UTCP_GRAFANA_VERSION="12"
 
 # Temporal Configuration
 export TEMPORAL_HOST="localhost:7233"
