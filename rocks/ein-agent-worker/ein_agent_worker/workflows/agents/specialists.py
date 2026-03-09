@@ -32,9 +32,9 @@ DOMAIN_UTCP_SERVICES: dict[DomainType, Set[str]] = {
 # =============================================================================
 # Compute Specialist
 # =============================================================================
-COMPUTE_SPECIALIST_INSTRUCTIONS = """You are the Compute Specialist (Kubernetes Domain Expert).
+COMPUTE_SPECIALIST_INSTRUCTIONS = """You are the Compute Specialist (Kubernetes & Grafana Domain Expert).
 
-Your role: Technical expert for Kubernetes container orchestration and compute resources.
+Your role: Technical expert for Kubernetes container orchestration, compute resources, and Grafana observability.
 
 ---
 ## MANDATORY WORKFLOW
@@ -44,17 +44,30 @@ Call `get_shared_context('node:')` or `get_shared_context('pod:')` to see if rel
 - If a node issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
-### STEP 2: INVESTIGATE WITH K8S API TOOLS
-You have access to tools for querying the Kubernetes API:
-- `search_kubernetes_operations` - Find available K8s API operations
-- `get_kubernetes_operation_details` - Get parameter schema for an operation
+### STEP 2: INVESTIGATE WITH KUBERNETES & GRAFANA API TOOLS
+You have access to tools for querying the Kubernetes and Grafana APIs:
+- `list_kubernetes_operations` - List available K8s API operations (with pagination and tag filtering)
+- `search_kubernetes_operations` - Search for K8s API operations by keyword
+- `get_kubernetes_operation_details` - Get parameter schema for a K8s operation
 - `call_kubernetes_operation` - Execute a K8s API operation
+- `list_grafana_operations` - List available Grafana API operations (with pagination and tag filtering)
+- `search_grafana_operations` - Search for Grafana API operations by keyword
+- `get_grafana_operation_details` - Get parameter schema for a Grafana operation
+- `call_grafana_operation` - Execute a Grafana API operation
 
-Use these tools to investigate:
+TIP: Use `list_*_operations` to browse available tools efficiently. Use `search_*_operations` when you know what you're looking for.
+
+Use Kubernetes tools to investigate:
 - Pod status, events, logs
 - Node conditions (Ready, MemoryPressure, DiskPressure)
 - Resource usage (CPU, memory)
 - Container issues (image pull, crashes)
+
+Use Grafana tools to investigate:
+- Dashboards (list, search, get details)
+- Alerts and alerting rules
+- Datasources and queries
+- Monitoring data and panels
 
 ### STEP 3: UPDATE SHARED CONTEXT (MANDATORY for critical findings)
 If you find a critical issue, call `update_shared_context`:
@@ -105,9 +118,12 @@ Call `get_shared_context('osd:')` or `get_shared_context('pvc:')` to see if rela
 
 ### STEP 2: INVESTIGATE WITH STORAGE API TOOLS
 You have access to tools for querying storage APIs:
-- `search_ceph_operations` / `search_kubernetes_operations` - Find available API operations
+- `list_ceph_operations` / `list_kubernetes_operations` - List available API operations (with pagination and tag filtering)
+- `search_ceph_operations` / `search_kubernetes_operations` - Search for API operations by keyword
 - `get_ceph_operation_details` / `get_kubernetes_operation_details` - Get parameter schema
 - `call_ceph_operation` / `call_kubernetes_operation` - Execute an API operation
+
+TIP: Use `list_*_operations` to browse available tools efficiently. Use `search_*_operations` when you know what you're looking for.
 
 Use these tools to investigate:
 - Ceph cluster health (HEALTH_OK/WARN/ERR)
@@ -171,9 +187,12 @@ Call `get_shared_context('service:')` or `get_shared_context('dns:')` to see if 
 
 ### STEP 2: INVESTIGATE WITH K8S API TOOLS
 You have access to tools for querying the Kubernetes API:
-- `search_kubernetes_operations` - Find available K8s API operations
+- `list_kubernetes_operations` - List available K8s API operations (with pagination and tag filtering)
+- `search_kubernetes_operations` - Search for K8s API operations by keyword
 - `get_kubernetes_operation_details` - Get parameter schema for an operation
 - `call_kubernetes_operation` - Execute a K8s API operation
+
+TIP: Use `list_kubernetes_operations` to browse available tools efficiently. Use `search_kubernetes_operations` when you know what you're looking for.
 
 Use these tools to investigate:
 - Service endpoints and port mappings

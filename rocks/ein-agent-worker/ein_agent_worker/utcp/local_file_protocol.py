@@ -9,6 +9,7 @@ import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import yaml
 from utcp.data.call_template import CallTemplate
@@ -134,28 +135,59 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
                 logger.info(f"Detected UTCP manual from '{manual_call_template.name}'")
                 utcp_manual = UtcpManualSerializer().validate_dict(spec_data)
             else:
-                # Use the registered API base URL instead of the file:// URL
-                # This ensures API calls go to the real endpoint, not the local file
+                # Convert OpenAPI spec to UTCP manual
                 service_name = manual_call_template.name
                 api_base_url = get_api_base_url(service_name)
 
+                # Construct the full base URL for API operations
+                # OpenApiConverter uses spec_url as the base for all API calls
+                spec_url_param = None
+
                 if api_base_url:
-                    logger.info(
-                        f"Using API base URL for '{service_name}': {api_base_url}"
-                    )
+                    parsed = urlparse(api_base_url)
+
+                    # Check if spec defines basePath (OpenAPI 2.0) or servers (OpenAPI 3.0)
+                    if 'basePath' in spec_data:
+                        base_path = spec_data['basePath']
+                        # Combine: scheme://host + basePath
+                        spec_url_param = f"{parsed.scheme}://{parsed.netloc}{base_path}"
+                        logger.info(
+                            f"[{service_name}] Using basePath from spec: '{base_path}' → {spec_url_param}"
+                        )
+                    elif 'servers' in spec_data and spec_data['servers']:
+                        # OpenAPI 3.0: use first server URL from spec
+                        server_url = spec_data['servers'][0].get('url', '')
+                        # If server URL is relative, combine with configured host
+                        if server_url.startswith('/'):
+                            spec_url_param = f"{parsed.scheme}://{parsed.netloc}{server_url}"
+                        elif server_url.startswith('http'):
+                            # Absolute URL in spec, but override host with configured one
+                            server_parsed = urlparse(server_url)
+                            spec_url_param = f"{parsed.scheme}://{parsed.netloc}{server_parsed.path}"
+                        else:
+                            spec_url_param = f"{parsed.scheme}://{parsed.netloc}/{server_url}"
+                        logger.info(
+                            f"[{service_name}] Using servers URL from spec: '{server_url}' → {spec_url_param}"
+                        )
+                    else:
+                        # No basePath or servers in spec, use configured base URL as-is
+                        spec_url_param = api_base_url
+                        logger.info(
+                            f"[{service_name}] No basePath/servers in spec, using configured base: {spec_url_param}"
+                        )
                 else:
+                    # No configured API base URL, fall back to spec file URL
+                    spec_url_param = manual_call_template.url
                     logger.warning(
-                        f"No API base URL registered for '{service_name}', "
-                        f"API calls may fail"
+                        f"[{service_name}] No API base URL configured, falling back to spec URL: {spec_url_param}"
                     )
-                    api_base_url = manual_call_template.url
 
                 logger.info(
-                    f"Converting OpenAPI spec to UTCP manual for '{service_name}'"
+                    f"[{service_name}] Converting OpenAPI spec to UTCP manual with base URL: {spec_url_param}"
                 )
                 converter = OpenApiConverter(
                     spec_data,
-                    spec_url=api_base_url,
+                    spec_url=spec_url_param,
                     call_template_name=manual_call_template.name,
                     auth_tools=manual_call_template.auth_tools,
                 )

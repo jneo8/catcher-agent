@@ -29,6 +29,12 @@ logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
+class _ListOperationsArguments:
+    service_name: str
+    tag: str = ""
+
+
+@dataclasses.dataclass
 class _SearchOperationsArguments:
     service_name: str
     query: str
@@ -59,6 +65,45 @@ def get_utcp_activities() -> Sequence[Callable]:
     Returns:
         Sequence of activity functions
     """
+
+    @activity.defn(name="utcp-list-operations")
+    async def list_operations(args: _ListOperationsArguments) -> str:
+        """List all available API operations with optional tag filtering."""
+        client = utcp_registry.get_client(args.service_name)
+        if not client:
+            return json.dumps({"error": f"UTCP service '{args.service_name}' not found"})
+
+        try:
+            # Fetch all tools using a broad search
+            all_tools = await client.search_tools(" ", limit=2000)
+
+            # Filter by tag if provided
+            if args.tag:
+                tag_lower = args.tag.lower()
+                filtered_tools = [
+                    t for t in all_tools
+                    if hasattr(t, "tags") and any(tag_lower in str(tag).lower() for tag in t.tags)
+                ]
+            else:
+                filtered_tools = all_tools
+
+            result = []
+            for tool in filtered_tools:
+                result.append({
+                    "name": tool.name,
+                    "tags": tool.tags if hasattr(tool, "tags") else [],
+                    "description": tool.description,
+                })
+
+            response = {
+                "total": len(result),
+                "operations": result,
+            }
+
+            return json.dumps(response, indent=2)
+        except Exception as e:
+            logger.error(f"Error listing {args.service_name} operations: {e}")
+            return json.dumps({"error": str(e)})
 
     @activity.defn(name="utcp-search-operations")
     async def search_operations(args: _SearchOperationsArguments) -> str:
@@ -156,6 +201,19 @@ def get_utcp_activities() -> Sequence[Callable]:
             return json.dumps({"error": f"UTCP service '{args.service_name}' not found"})
 
         try:
+            # Validate tool name belongs to this service
+            # Tool names should be prefixed with service name (e.g., "kubernetes.listPods")
+            expected_prefix = f"{args.service_name}."
+            if not args.tool_name.startswith(expected_prefix):
+                error_msg = (
+                    f"Tool name mismatch: '{args.tool_name}' does not start with '{expected_prefix}'. "
+                    f"You called 'call_{args.service_name}_operation' but provided a tool from a different service. "
+                    f"Please use the correct tool function: call_{args.tool_name.split('.')[0]}_operation"
+                )
+                logger.error(f"[{args.service_name}] {error_msg}")
+                return json.dumps({"error": error_msg})
+
+            logger.debug(f"[{args.service_name}] Calling tool: {args.tool_name}")
             arguments = json.loads(args.arguments) if args.arguments else {}
             result = await client.call_tool(args.tool_name, arguments)
             return _serialize_result(result)
@@ -165,11 +223,11 @@ def get_utcp_activities() -> Sequence[Callable]:
             import traceback
 
             error_msg = str(e) or type(e).__name__
-            logger.error(f"Error calling {args.service_name} operation {args.tool_name}: {error_msg}")
+            logger.error(f"[{args.service_name}] Error calling operation {args.tool_name}: {error_msg}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             return json.dumps({"error": error_msg})
 
-    return (search_operations, get_operation_details, call_operation)
+    return (list_operations, search_operations, get_operation_details, call_operation)
 
 
 # =============================================================================
@@ -194,6 +252,26 @@ def create_utcp_workflow_tools(
         List of function tools for the agent
     """
     _config = config or ActivityConfig(start_to_close_timeout=timedelta(seconds=60))
+
+    @function_tool(name_override=f"list_{service_name}_operations")
+    async def list_operations(tag: str = "") -> str:
+        """List all available API operations with optional tag filtering.
+
+        Use this to discover what operations are available without searching.
+        Returns ALL operations (no pagination).
+
+        Args:
+            tag: Optional tag filter (e.g., "v1", "core", "apps"). Leave empty to list all.
+
+        Returns:
+            JSON list of available operations with their names, tags, and descriptions.
+        """
+        return await workflow.execute_activity(
+            "utcp-list-operations",
+            _ListOperationsArguments(service_name, tag),
+            result_type=str,
+            **_config,
+        )
 
     @function_tool(name_override=f"search_{service_name}_operations")
     async def search_operations(query: str, limit: int = 20) -> str:
@@ -235,10 +313,13 @@ def create_utcp_workflow_tools(
 
     @function_tool(name_override=f"call_{service_name}_operation")
     async def call_operation(tool_name: str, arguments: str = "{}") -> str:
-        """Execute an API operation.
+        f"""Execute a {service_name} API operation.
+
+        IMPORTANT: This tool is ONLY for {service_name} operations. Tool names must start with '{service_name}.'
+        If you need to call operations from other services, use their respective call_*_operation tools.
 
         Args:
-            tool_name: The exact tool name from search results
+            tool_name: The exact tool name from search results (must start with '{service_name}.')
             arguments: JSON string of arguments matching the tool's parameter schema
 
         Returns:
@@ -251,7 +332,7 @@ def create_utcp_workflow_tools(
             **_config,
         )
 
-    return [search_operations, get_operation_details, call_operation]
+    return [list_operations, search_operations, get_operation_details, call_operation]
 
 
 # =============================================================================

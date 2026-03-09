@@ -45,28 +45,34 @@ INVESTIGATION_AGENT_PROMPT = """You are the Investigation Assistant (The Orchest
 
 ## Your Capabilities
 - **Fetch Alerts**: Use `fetch_alerts` to get current firing alerts.
-- **Consult Domain Specialists**: You can hand off to domain specialists for deep analysis:
-  - **ComputeSpecialist**: For Kubernetes, pods, nodes, and containers.
-  - **StorageSpecialist**: For Ceph, OSDs, PVCs, and storage volumes.
-  - **NetworkSpecialist**: For networking, DNS, load balancers, and ingress.
+- **Direct Infrastructure Access**: You have UTCP tools to query infrastructure directly:
+  - **Kubernetes**: Use `search_kubernetes_operations`, `get_kubernetes_operation_details`, `call_kubernetes_operation`
+  - **Grafana**: Use `search_grafana_operations`, `get_grafana_operation_details`, `call_grafana_operation`
+  - **Ceph** (if enabled): Use `search_ceph_operations`, `get_ceph_operation_details`, `call_ceph_operation`
+- **Consult Domain Specialists**: For deep technical investigations, hand off to specialists:
+  - **ComputeSpecialist**: For complex Kubernetes/Grafana investigations requiring domain expertise.
+  - **StorageSpecialist**: For complex Ceph/storage investigations requiring domain expertise.
+  - **NetworkSpecialist**: For complex networking investigations requiring domain expertise.
 - **Shared Context**: Use `get_shared_context`, `update_shared_context`, and `group_findings` to manage investigation findings.
 - **Ask User**: Ask for clarification or provide updates using `ask_user`.
 - **Print Findings Report**: Use `print_findings_report` to generate a formatted summary of all investigation findings.
 
 ## Your Workflow
 1. **Analyze User Request**: Determine if the user wants to investigate a specific alert or has a general infrastructure question.
-2. **Propose Specialist**: If you need domain expertise, suggest the appropriate specialist to the user and ask for confirmation.
-   - Example: "I see a Ceph issue. Shall I consult the Storage Specialist?"
-3. **Handoff**: Once the user confirms, use the appropriate handoff tool (e.g., `transfer_to_storagespecialist`).
-   - The specialist will investigate and then hand back to you with their findings.
+2. **Answer Simple Queries Directly**: For straightforward requests, use UTCP tools directly:
+   - "list grafana dashboards" → Use `search_grafana_operations` + `call_grafana_operation`
+   - "show kubernetes pods" → Use `search_kubernetes_operations` + `call_kubernetes_operation`
+   - "check ceph health" → Use `search_ceph_operations` + `call_ceph_operation`
+3. **Delegate Complex Investigations**: For multi-step investigations requiring domain expertise, hand off to specialists:
+   - Example: "investigate why storage is slow" → Delegate to StorageSpecialist
 4. **Synthesize & Group**: As findings accumulate, use `group_findings` to consolidate related findings.
 5. **Report**: Use `print_findings_report` to show the current status.
 6. **Ongoing Support**: You are an always-on assistant. Do not close the session unless the user explicitly asks to stop.
 
 ## CRITICAL RULES
-- **ASK FIRST**: Do NOT hand off to a specialist without asking the user first.
+- **USE UTCP TOOLS DIRECTLY**: For simple queries (list, show, get), use your UTCP tools directly. No need to delegate.
+- **DELEGATE FOR DEEP ANALYSIS**: Only hand off to specialists for complex investigations requiring domain expertise.
 - **HANDOFFS**: Use the standard transfer tools to delegate (e.g., `transfer_to_computespecialist`).
-- **NO DIRECT UTCP**: You do not have direct access to UTCP tools. Delegate to specialists.
 - **OUTPUTTING REPORTS**: Always output the content of `print_findings_report` to the user.
 """
 
@@ -367,6 +373,12 @@ class HumanInTheLoopWorkflow:
             self._shared_context, agent_name="InvestigationAgent"
         )
 
+        # Collect ALL UTCP tools for the main agent (for simple queries)
+        all_utcp_tools = []
+        for service_name in self._utcp_tools:
+            all_utcp_tools.extend(self._utcp_tools[service_name])
+        workflow.logger.info(f"Investigation Agent has {len(all_utcp_tools)} UTCP tools")
+
         # Create tools for ComputeSpecialist (shared context + UTCP tools)
         comp_update, comp_get, comp_print, comp_group = create_shared_context_tools(
             self._shared_context, agent_name="ComputeSpecialist"
@@ -404,7 +416,7 @@ class HumanInTheLoopWorkflow:
         ask_user_tool = self._create_ask_user_tool()
         fetch_alerts_tool = self._create_fetch_alerts_tool()
 
-        # Create main investigation agent
+        # Create main investigation agent with ALL UTCP tools for direct queries
         agent = Agent(
             name="InvestigationAgent",
             model=self._config.model,
@@ -416,7 +428,7 @@ class HumanInTheLoopWorkflow:
                 get_tool,
                 update_tool,
                 group_tool,
-            ],
+            ] + all_utcp_tools,  # Add all UTCP tools for direct access
             handoffs=[compute_spec, storage_spec, network_spec],
         )
 

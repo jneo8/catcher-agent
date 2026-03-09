@@ -102,7 +102,8 @@ def _serialize_result(result) -> str:
 def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callable]:
     """Create UTCP tools with the client captured in closures.
 
-    This follows the operator-agent-poc pattern with 3 tools:
+    This follows the operator-agent-poc pattern with 4 tools:
+    - list_{service}_operations: List available API operations with pagination
     - search_{service}_operations: Search for available API operations
     - get_{service}_operation_details: Get parameter schema for an operation
     - call_{service}_operation: Execute an API operation
@@ -114,6 +115,52 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
     Returns:
         List of function tools for the agent
     """
+
+    @function_tool(name_override=f"list_{service_name}_operations")
+    async def list_operations(tag: str = "") -> str:
+        """List all available API operations with optional tag filtering.
+
+        Use this to discover what operations are available without searching.
+        Returns ALL operations (no pagination).
+
+        Args:
+            tag: Optional tag filter (e.g., "v1", "core", "apps"). Leave empty to list all.
+
+        Returns:
+            JSON list of available operations with their names, tags, and descriptions.
+        """
+        try:
+            # Fetch all tools using a broad search
+            # UTCP doesn't have a native "list all" API, so we use search with a common term
+            all_tools = await utcp_client.search_tools(" ", limit=2000)
+
+            # Filter by tag if provided
+            if tag:
+                tag_lower = tag.lower()
+                filtered_tools = [
+                    t for t in all_tools
+                    if hasattr(t, "tags") and any(tag_lower in str(tag).lower() for tag in t.tags)
+                ]
+            else:
+                filtered_tools = all_tools
+
+            result = []
+            for tool in filtered_tools:
+                result.append({
+                    "name": tool.name,
+                    "tags": tool.tags if hasattr(tool, "tags") else [],
+                    "description": tool.description,
+                })
+
+            response = {
+                "total": len(result),
+                "operations": result,
+            }
+
+            return json.dumps(response, indent=2)
+        except Exception as e:
+            logger.error(f"Error listing {service_name} operations: {e}")
+            return json.dumps({"error": str(e)})
 
     @function_tool(name_override=f"search_{service_name}_operations")
     async def search_operations(query: str, limit: int = 20) -> str:
@@ -215,16 +262,32 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
 
     @function_tool(name_override=f"call_{service_name}_operation")
     async def call_operation(tool_name: str, arguments: str = "{}") -> str:
-        """Execute an API operation.
+        f"""Execute a {service_name} API operation.
+
+        IMPORTANT: This tool is ONLY for {service_name} operations. Tool names must start with '{service_name}.'
+        If you need to call operations from other services, use their respective call_*_operation tools.
 
         Args:
-            tool_name: The exact tool name from search results
+            tool_name: The exact tool name from search results (must start with '{service_name}.')
             arguments: JSON string of arguments matching the tool's parameter schema
 
         Returns:
             The result of the API call as JSON
         """
         try:
+            # Validate tool name belongs to this service
+            # Tool names should be prefixed with service name (e.g., "kubernetes.listPods")
+            expected_prefix = f"{service_name}."
+            if not tool_name.startswith(expected_prefix):
+                error_msg = (
+                    f"Tool name mismatch: '{tool_name}' does not start with '{expected_prefix}'. "
+                    f"You called 'call_{service_name}_operation' but provided a tool from a different service. "
+                    f"Please use the correct tool function: call_{tool_name.split('.')[0]}_operation"
+                )
+                logger.error(f"[{service_name}] {error_msg}")
+                return json.dumps({"error": error_msg})
+
+            logger.debug(f"[{service_name}] Calling tool: {tool_name}")
             args = json.loads(arguments) if arguments else {}
             result = await utcp_client.call_tool(tool_name, args)
             return _serialize_result(result)
@@ -233,11 +296,11 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
         except Exception as e:
             import traceback
             error_msg = str(e) or type(e).__name__
-            logger.error(f"Error calling {service_name} operation {tool_name}: {error_msg}")
+            logger.error(f"[{service_name}] Error calling operation {tool_name}: {error_msg}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             return json.dumps({"error": error_msg})
 
-    return [search_operations, get_operation_details, call_operation]
+    return [list_operations, search_operations, get_operation_details, call_operation]
 
 
 def _serialize_schema(obj) -> dict:
@@ -301,23 +364,41 @@ class ToolLoader:
         spec_source = openapi_url
         spec_type = "live"
 
+        # Calculate API base URL (strip /openapi/v2 or /openapi/v3 suffix)
+        # This is needed when OpenAPI specs don't specify basePath/servers
+        api_base_url = openapi_url
+        original_url = openapi_url
+        for suffix in ["/openapi/v2", "/openapi/v3", "/openapi"]:
+            if api_base_url.endswith(suffix):
+                api_base_url = api_base_url[:-len(suffix)]
+                logger.debug(
+                    f"[{service_name}] Stripped '{suffix}' from URL: {original_url} → {api_base_url}"
+                )
+                break
+
         # Check for local spec file first
         local_spec_path = self.get_spec_path(service_name, version)
         if local_spec_path and local_spec_path.exists():
             spec_source = f"file://{local_spec_path}"
             spec_type = "local"
-            # Register the real API URL so that API calls go to the correct endpoint
+            # Register the real API base URL so that API calls go to the correct endpoint
             # (not the file:// URL which is only for loading the spec)
-            set_api_base_url(service_name, openapi_url)
+            set_api_base_url(service_name, api_base_url)
             logger.info(
                 f"[{service_name}] Loading OpenAPI spec from LOCAL file: {local_spec_path}"
             )
             logger.info(
-                f"[{service_name}] API calls will use: {openapi_url}"
+                f"[{service_name}] API calls will use base: {api_base_url}"
             )
         else:
+            # For live URLs, also register the API base URL
+            # This ensures proper base path when OpenAPI spec doesn't define basePath/servers
+            set_api_base_url(service_name, api_base_url)
             logger.info(
                 f"[{service_name}] Loading OpenAPI spec from LIVE URL: {openapi_url}"
+            )
+            logger.info(
+                f"[{service_name}] API calls will use base: {api_base_url}"
             )
             if local_spec_path:
                 logger.debug(
@@ -325,6 +406,9 @@ class ToolLoader:
                 )
 
         # Build the call template
+        # NOTE: The 'url' field is used for loading the OpenAPI spec.
+        # For local specs (file://), we register the real API base URL separately
+        # so that OpenApiConverter can use it when converting operations.
         call_template: dict = {
             "name": service_name,
             "call_template_type": "http",
@@ -358,6 +442,12 @@ class ToolLoader:
             config_dict["load_variables_from"] = load_variables_from
 
         logger.info(f"[{service_name}] Creating UTCP client (spec_type={spec_type})")
+        logger.info(f"[{service_name}] Final configuration:")
+        logger.info(f"  - Spec source: {spec_source}")
+        logger.info(f"  - API base URL: {api_base_url}")
+        logger.info(f"  - Auth type: {auth_type}")
+        logger.info(f"  - Insecure mode: {insecure}")
+
         config = UtcpClientConfig(**config_dict)
         client = await UtcpClient.create(config=config)
         self._clients[service_name] = client
