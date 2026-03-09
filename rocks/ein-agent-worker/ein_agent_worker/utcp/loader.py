@@ -86,6 +86,26 @@ class K8sBearerTokenLoader(VariableLoader):
             return f"Bearer {self.token}"
         return None
 
+
+class GrafanaBearerTokenLoader(VariableLoader):
+    """Variable loader that provides Grafana bearer token for direct API access.
+
+    UTCP's OpenAPI security definitions require API key variables to be resolved.
+    This loader provides the bearer token for grafana_API_KEY_* variables.
+    """
+
+    variable_loader_type: str = "grafana_bearer"
+    token: str
+
+    def __init__(self, token: str, **kwargs):
+        super().__init__(token=token, **kwargs)
+
+    def get(self, key: str) -> Optional[str]:
+        """Return bearer token for Grafana API key variables."""
+        if re.match(r"grafana_API_KEY_\d+", key):
+            return f"Bearer {self.token}"
+        return None
+
 # Default specs directory (relative to this file)
 DEFAULT_SPECS_DIR = Path(__file__).parent.parent.parent / "specs"
 
@@ -417,6 +437,7 @@ class ToolLoader:
 
         # Configure authentication for bearer token
         # K8sBearerTokenLoader resolves API key variables (e.g., kubernetes_API_KEY_0)
+        # GrafanaBearerTokenLoader resolves API key variables (e.g., grafana_API_KEY_204)
         # referenced in the OpenAPI spec's security schemes.
         # This works because UTCP client creation now happens at worker startup,
         # outside Temporal's workflow sandbox.
@@ -428,7 +449,11 @@ class ToolLoader:
                 "var_name": "Authorization",
                 "location": "header",
             }
-            load_variables_from.append(K8sBearerTokenLoader(token=token))
+            # Use service-specific variable loader
+            if service_name == "grafana":
+                load_variables_from.append(GrafanaBearerTokenLoader(token=token))
+            else:
+                load_variables_from.append(K8sBearerTokenLoader(token=token))
             logger.info(f"[{service_name}] Configured bearer token authentication")
 
         config_dict: dict = {
