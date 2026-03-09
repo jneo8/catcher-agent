@@ -135,24 +135,35 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
     Returns:
         List of function tools for the agent
     """
+    # Cache for all available tools (populated lazily on first use)
+    _tools_cache: Optional[List] = None
+
+    async def _get_all_tools():
+        """Get all tools with caching to avoid repeated fetches."""
+        nonlocal _tools_cache
+        if _tools_cache is None:
+            logger.info(f"[{service_name}] Loading all operations into cache (one-time operation)")
+            _tools_cache = await utcp_client.search_tools(" ", limit=2000)
+            logger.info(f"[{service_name}] Cached {len(_tools_cache)} operations")
+        return _tools_cache
 
     @function_tool(name_override=f"list_{service_name}_operations")
-    async def list_operations(tag: str = "") -> str:
-        """List all available API operations with optional tag filtering.
+    async def list_operations(tag: str = "", page: int = 1) -> str:
+        """List available API operations with optional tag filtering and pagination.
 
-        Use this to discover what operations are available without searching.
-        Returns ALL operations (no pagination).
+        Use this to discover what operations are available. Returns only operation names as plain text.
+        For details about specific operations, use get_{service}_operation_details.
 
         Args:
             tag: Optional tag filter (e.g., "v1", "core", "apps"). Leave empty to list all.
+            page: Page number starting from 1 (default: 1, 200 operations per page)
 
         Returns:
-            JSON list of available operations with their names, tags, and descriptions.
+            Plain text list of operation names (one per line) with pagination info.
         """
         try:
-            # Fetch all tools using a broad search
-            # UTCP doesn't have a native "list all" API, so we use search with a common term
-            all_tools = await utcp_client.search_tools(" ", limit=2000)
+            # Use cached tools to avoid repeated fetches
+            all_tools = await _get_all_tools()
 
             # Filter by tag if provided
             if tag:
@@ -164,23 +175,25 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
             else:
                 filtered_tools = all_tools
 
-            result = []
-            for tool in filtered_tools:
-                result.append({
-                    "name": tool.name,
-                    "tags": tool.tags if hasattr(tool, "tags") else [],
-                    "description": tool.description,
-                })
+            # Apply pagination (200 per page)
+            page_size = 200
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
 
-            response = {
-                "total": len(result),
-                "operations": result,
-            }
+            paginated_tools = filtered_tools[start_idx:end_idx]
+            total_count = len(filtered_tools)
+            total_pages = (total_count + page_size - 1) // page_size
 
-            return json.dumps(response, indent=2)
+            # Return plain text list of names
+            operation_names = [tool.name for tool in paginated_tools]
+
+            result = f"Total: {total_count} operations | Page: {page}/{total_pages}\n\n"
+            result += "\n".join(operation_names)
+
+            return result
         except Exception as e:
             logger.error(f"Error listing {service_name} operations: {e}")
-            return json.dumps({"error": str(e)})
+            return f"Error: {str(e)}"
 
     @function_tool(name_override=f"search_{service_name}_operations")
     async def search_operations(query: str, limit: int = 20) -> str:
@@ -189,14 +202,14 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
         Args:
             query: Natural language description of what you want to do
                    (e.g., "list pods", "get dashboard", "cluster status")
-            limit: Maximum number of operations to return (default: 20)
+            limit: Maximum number of operations to return (default: 20, max: 50)
 
         Returns:
-            JSON list of available operations with their names and descriptions.
+            JSON list of available operations with their names and descriptions (truncated to 100 chars).
         """
         try:
-            # Fetch all tools for client-side scoring
-            all_tools = await utcp_client.search_tools(" ", limit=2000)
+            # Use cached tools to avoid repeated fetches
+            all_tools = await _get_all_tools()
 
             query_lower = query.lower()
             query_words = query_lower.split()
@@ -231,15 +244,21 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
             # Sort by score descending
             scored_tools.sort(key=lambda x: x[0], reverse=True)
 
-            # Take top 'limit'
-            top_tools = [t[1] for t in scored_tools[:limit]]
+            # Take top 'limit' (cap at 50)
+            actual_limit = min(limit, 50)
+            top_tools = [t[1] for t in scored_tools[:actual_limit]]
 
             result = []
             for tool in top_tools:
+                # Truncate description to 100 chars
+                desc = tool.description if tool.description else ""
+                if len(desc) > 100:
+                    desc = desc[:100] + "..."
+
                 result.append({
                     "name": tool.name,
                     "tags": tool.tags if hasattr(tool, "tags") else [],
-                    "description": tool.description,
+                    "description": desc,
                 })
 
             return json.dumps(result, indent=2)
@@ -260,9 +279,10 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
             JSON schema of the tool's parameters.
         """
         try:
-            tools = await utcp_client.search_tools(tool_name, limit=10)
+            # Use cached tools to avoid repeated fetches
+            all_tools = await _get_all_tools()
 
-            for tool in tools:
+            for tool in all_tools:
                 if tool.name == tool_name:
                     # Serialize the schema
                     schema = _serialize_schema(tool.inputs) if hasattr(tool, "inputs") else {}
