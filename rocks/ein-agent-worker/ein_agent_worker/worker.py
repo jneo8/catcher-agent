@@ -49,7 +49,8 @@ async def initialize_utcp_clients() -> None:
                 insecure=svc.insecure,
                 version=svc.version,
             )
-            utcp_registry.register_client(svc.name, client)
+            # Register client along with its config (for approval policy)
+            utcp_registry.register_client(svc.name, client, config=svc)
         except Exception as e:
             logger.error(f"Failed to initialize UTCP client for {svc.name}: {e}")
 

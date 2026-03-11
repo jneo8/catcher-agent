@@ -143,6 +143,15 @@ class HITLOrchestrator:
         """
         await self.handle.signal("provide_agent_selection", selected_agent)
 
+    @handle_rpc_error()
+    async def provide_approval_decisions(self, decisions: list[dict]) -> None:
+        """Send approval decisions for pending tool calls.
+
+        Args:
+            decisions: List of approval decision dicts (interruption_id, approved, always, reason)
+        """
+        await self.handle.signal("provide_approval_decisions", decisions)
+
     @handle_rpc_error(return_on_error={"status": "completed"}, print_error=False)
     async def get_state(self) -> dict[str, Any]:
         """Get current workflow state.
@@ -246,6 +255,112 @@ class HITLOrchestrator:
             except ValueError:
                 console.print_error("Please enter a number.")
 
+    async def _handle_approval_interruptions(self, interruptions: list[dict[str, Any]]) -> list[dict]:
+        """Handle approval interruptions UI.
+
+        Displays each tool call and prompts user to approve/reject with sticky option.
+
+        Args:
+            interruptions: List of WorkflowInterruption dicts
+
+        Returns:
+            List of ApprovalDecision dicts
+        """
+        console.print_panel(
+            f"Agent needs approval for {len(interruptions)} operation(s)",
+            title="[yellow]Tool Approval Required[/yellow]",
+            border_style="yellow",
+        )
+
+        decisions = []
+
+        for idx, interruption in enumerate(interruptions, 1):
+            interruption_id = interruption["id"]
+            tool_name = interruption.get("tool_name", "unknown")
+            arguments = interruption.get("arguments", {})
+            agent_name = interruption.get("agent_name", "Agent")
+
+            # Extract real operation from UTCP wrapper if present
+            real_tool_name = tool_name
+            real_arguments = arguments
+
+            if tool_name.startswith("call_") and tool_name.endswith("_operation"):
+                # This is a UTCP wrapper, extract the real operation
+                real_tool_name = arguments.get("tool_name", tool_name)
+                args_str = arguments.get("arguments", "{}")
+
+                # Parse the arguments string
+                if isinstance(args_str, str):
+                    import json
+                    try:
+                        real_arguments = json.loads(args_str) if args_str else {}
+                    except json.JSONDecodeError:
+                        real_arguments = {"raw": args_str}
+                else:
+                    real_arguments = args_str if isinstance(args_str, dict) else {}
+
+            # Display compact approval request
+            console.print_dim(f"\n({idx}/{len(interruptions)}) {agent_name}")
+            console.print_message(f"  → [cyan]{real_tool_name}[/cyan]")
+
+            # Show arguments only if non-empty
+            if real_arguments:
+                console.print_dim("  Arguments:")
+                for key, value in real_arguments.items():
+                    value_str = str(value)
+                    if len(value_str) > 80:
+                        value_str = value_str[:77] + "..."
+                    console.print_dim(f"    {key}: {value_str}")
+
+            # Prompt for decision with clearer options
+            print()
+            console.print_message("  [dim]y[/dim] - Approve once      [dim]a[/dim] - Approve always")
+            console.print_message("  [dim]n[/dim] - Reject once       [dim]r[/dim] - Reject always")
+            print()
+
+            while True:
+                choice = input("  Your choice: ").strip().lower()
+
+                # Flexible input parsing
+                if choice in ("y", "yes", "approve"):
+                    decisions.append({
+                        "interruption_id": interruption_id,
+                        "approved": True,
+                        "always": False,
+                    })
+                    console.print_success("  ✓ Approved")
+                    break
+                elif choice in ("a", "always", "approve always"):
+                    decisions.append({
+                        "interruption_id": interruption_id,
+                        "approved": True,
+                        "always": True,
+                    })
+                    console.print_success(f"  ✓ Approved always → [dim]{real_tool_name}[/dim]")
+                    break
+                elif choice in ("n", "no", "reject"):
+                    decisions.append({
+                        "interruption_id": interruption_id,
+                        "approved": False,
+                        "always": False,
+                    })
+                    console.print_warning("  ✗ Rejected")
+                    break
+                elif choice in ("r", "reject always", "always reject"):
+                    decisions.append({
+                        "interruption_id": interruption_id,
+                        "approved": False,
+                        "always": True,
+                    })
+                    console.print_warning(f"  ✗ Rejected always → [dim]{real_tool_name}[/dim]")
+                    break
+                else:
+                    console.print_error("  Invalid. Enter: y, a, n, or r")
+
+            print()  # Add spacing between interruptions
+
+        return decisions
+
     async def wait_for_response(
         self,
         poll_interval: float = 0.5,
@@ -298,6 +413,11 @@ class HITLOrchestrator:
 
             if state.get("pending_handoff"):
                 return "[HANDOFF]"
+
+            # Check for interruptions (tool approvals, etc.)
+            interruptions = state.get("interruptions", [])
+            if interruptions:
+                return "[INTERRUPTIONS]"
 
             # Check status
             if status in ["completed", "ended"]:
@@ -400,6 +520,15 @@ class HITLOrchestrator:
                             await self.provide_confirmation(confirm == "y")
                             continue
 
+                    if response == "[INTERRUPTIONS]":
+                        state = await self.get_state()
+                        interruptions = state.get("interruptions", [])
+                        if interruptions:
+                            # Handle all interruptions and collect decisions
+                            decisions = await self._handle_approval_interruptions(interruptions)
+                            # Send decisions to workflow
+                            await self.provide_approval_decisions(decisions)
+                            continue
 
                     if response:
                         console.print_message(f"\n[bold cyan]Agent:[/bold cyan] {response}\n")

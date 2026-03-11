@@ -2,9 +2,12 @@
 
 from .investigation import InvestigationConfig, SharedContext, SharedFinding
 from .hitl import (
+    ApprovalDecision,
+    ApprovalPolicy,
     WorkflowStatus,
     ChatMessage,
     WorkflowState,
+    WorkflowInterruption,
     HITLConfig,
     AgentSelectionRequest,
     WorkflowEvent,
@@ -15,9 +18,12 @@ __all__ = [
     "InvestigationConfig",
     "SharedContext",
     "SharedFinding",
+    "ApprovalDecision",
+    "ApprovalPolicy",
     "WorkflowStatus",
     "ChatMessage",
     "WorkflowState",
+    "WorkflowInterruption",
     "HITLConfig",
     "AgentSelectionRequest",
     "WorkflowEvent",

@@ -21,6 +21,8 @@ from ein_agent_worker.models import (
     HITLConfig,
     WorkflowEvent,
     WorkflowEventType,
+    WorkflowInterruption,
+    ApprovalDecision,
 )
 
 with workflow.unsafe.imports_passed_through():
@@ -148,6 +150,22 @@ class HumanInTheLoopWorkflow:
             WorkflowEvent(
                 type=WorkflowEventType.SELECTION,
                 payload=selected_agent if selected_agent else None,
+                timestamp=workflow.now()
+            )
+        )
+
+    @workflow.signal
+    async def provide_approval_decisions(self, decisions: list[dict]) -> None:
+        """User provides approval/rejection decisions for pending interruptions.
+
+        Args:
+            decisions: List of ApprovalDecision dicts
+        """
+        workflow.logger.info(f"Received {len(decisions)} approval decision(s)")
+        self._event_queue.append(
+            WorkflowEvent(
+                type=WorkflowEventType.CONFIRMATION,
+                payload=decisions,
                 timestamp=workflow.now()
             )
         )
@@ -290,6 +308,50 @@ class HumanInTheLoopWorkflow:
                     run_config=self._run_config,
                 )
 
+                # Handle interruptions (tool approvals, etc.)
+                while result.interruptions:
+                    workflow.logger.info(f"Agent execution interrupted: {len(result.interruptions)} interruption(s)")
+
+                    # Convert SDK interruptions to our WorkflowInterruption model
+                    self._state.interruptions = [
+                        self._convert_sdk_interruption(i, agent.name)
+                        for i in result.interruptions
+                    ]
+
+                    # Wait for approval decisions from user
+                    workflow.logger.info("Waiting for approval decisions...")
+                    event = await self._wait_for_event_type(WorkflowEventType.CONFIRMATION)
+
+                    if self._should_end or event.type == WorkflowEventType.STOP:
+                        break
+
+                    # Process approval decisions
+                    decisions_data = event.payload
+                    if not decisions_data:
+                        workflow.logger.warning("No decisions provided, rejecting all")
+                        decisions_data = []
+
+                    # Parse decisions
+                    decisions = [ApprovalDecision(**d) for d in decisions_data]
+                    workflow.logger.info(f"Processing {len(decisions)} approval decision(s)")
+
+                    # Apply decisions and update cache
+                    state = self._apply_approval_decisions(result, decisions)
+
+                    # Clear interruptions from state
+                    self._state.interruptions = []
+
+                    # Resume agent with decisions
+                    result = await Runner.run(
+                        agent,
+                        input=state,
+                        max_turns=30,
+                        run_config=self._run_config,
+                    )
+
+                if self._should_end:
+                    break
+
                 response = result.final_output or "I encountered an issue processing your request."
 
                 # Add agent response to history
@@ -342,8 +404,17 @@ class HumanInTheLoopWorkflow:
         workflow.logger.info(f"Creating tools for {len(services)} UTCP service(s)")
 
         for service_name in services:
+            # Get service config for approval policy
+            service_config = utcp_registry.get_service_config(service_name)
+
             # Create workflow tools that execute as activities
-            tools = create_utcp_workflow_tools(service_name)
+            # Pass sticky_approvals dict so tools can check for cached decisions
+            # Since dicts are mutable, updates to sticky_approvals will be visible to approval checkers
+            tools = create_utcp_workflow_tools(
+                service_name,
+                service_config=service_config,
+                sticky_approvals=self._state.sticky_approvals
+            )
             self._utcp_tools[service_name] = tools
             workflow.logger.info(
                 f"Created {len(tools)} tools for {service_name}: "
@@ -365,6 +436,101 @@ class HumanInTheLoopWorkflow:
             if service in self._utcp_tools:
                 tools.extend(self._utcp_tools[service])
         return tools
+
+    # =========================================================================
+    # Approval Handling
+    # =========================================================================
+
+    def _convert_sdk_interruption(self, sdk_interruption, agent_name: str) -> WorkflowInterruption:
+        """Convert OpenAI SDK interruption to our WorkflowInterruption model.
+
+        Args:
+            sdk_interruption: Interruption from OpenAI SDK
+            agent_name: Name of the agent that created the interruption
+
+        Returns:
+            WorkflowInterruption instance
+        """
+        # Generate unique ID for this interruption
+        interruption_id = f"{sdk_interruption.tool_name}:{sdk_interruption.call_id}"
+
+        # Parse arguments - might be dict, string, or None
+        arguments = sdk_interruption.arguments
+        if isinstance(arguments, str):
+            import json
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                workflow.logger.warning(f"Failed to parse arguments as JSON: {arguments}")
+                arguments = {"raw": arguments}
+        elif arguments is None:
+            arguments = {}
+        elif not isinstance(arguments, dict):
+            # Some other type, wrap it
+            arguments = {"value": arguments}
+
+        return WorkflowInterruption(
+            id=interruption_id,
+            type="tool_approval",
+            agent_name=agent_name,
+            tool_name=sdk_interruption.tool_name,
+            arguments=arguments,
+            context={
+                "call_id": sdk_interruption.call_id,
+                "description": f"Tool call: {sdk_interruption.tool_name}",
+            },
+            timestamp=workflow.now(),
+        )
+
+    def _apply_approval_decisions(self, result, decisions: list[ApprovalDecision]):
+        """Apply approval/rejection decisions and update sticky approvals.
+
+        Args:
+            result: Agent run result with interruptions
+            decisions: List of user approval decisions
+
+        Returns:
+            Updated state for resuming agent execution
+        """
+        # Convert RunResult to RunState to access approve/reject methods
+        state = result.to_state()
+
+        # Create a map of interruption_id -> decision
+        decision_map = {d.interruption_id: d for d in decisions}
+
+        # Find matching SDK interruptions and approve/reject
+        for interruption in result.interruptions:
+            interruption_id = f"{interruption.tool_name}:{interruption.call_id}"
+
+            decision = decision_map.get(interruption_id)
+            if not decision:
+                # No decision provided, reject by default
+                workflow.logger.warning(f"No decision for {interruption_id}, rejecting")
+                state.reject(interruption)
+                continue
+
+            if decision.approved:
+                workflow.logger.info(f"Approving: {interruption.tool_name}")
+                state.approve(interruption)
+
+                # Store sticky approval if "always approve"
+                if decision.always:
+                    self._state.sticky_approvals[interruption.tool_name] = True
+                    workflow.logger.info(f"Sticky approval stored for {interruption.tool_name}")
+            else:
+                workflow.logger.info(f"Rejecting: {interruption.tool_name}")
+                state.reject(interruption)
+
+                # Store sticky rejection if "always reject"
+                if decision.always:
+                    self._state.sticky_approvals[interruption.tool_name] = False
+                    workflow.logger.info(f"Sticky rejection stored for {interruption.tool_name}")
+
+        return state
+
+    # =========================================================================
+    # Agent Creation
+    # =========================================================================
 
     def _create_investigation_agent(self) -> Agent:
         """Create the investigation agent with specialists."""

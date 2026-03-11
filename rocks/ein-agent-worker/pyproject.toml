@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
     "litellm>=1.80.0",
-    "openai-agents>=0.5.1",
+    "openai-agents>=0.6.0",
     "pyyaml>=6.0.3",
     "temporalio>=1.19.0",
     "utcp>=1.1.2",

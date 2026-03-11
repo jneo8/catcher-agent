@@ -34,6 +34,36 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# Approval Policies
+# =============================================================================
+
+class ApprovalPolicy(str, Enum):
+    """Policy for tool call approval.
+
+    - NEVER: Never require approval (trust all operations)
+    - ALWAYS: Always require approval for every operation
+    - WRITE_OPERATIONS: Require approval only for write operations (POST, PUT, PATCH, DELETE)
+    - READ_ONLY: Require approval only for read operations (GET, LIST)
+    """
+    NEVER = "never"
+    ALWAYS = "always"
+    WRITE_OPERATIONS = "write_operations"
+    READ_ONLY = "read_only"
+
+    @classmethod
+    def default(cls) -> "ApprovalPolicy":
+        """Default policy is to approve writes only in production."""
+        return cls.WRITE_OPERATIONS
+
+
+# HTTP methods that are considered "write" operations
+WRITE_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE", "CREATE", "UPDATE"}
+
+# HTTP methods that are considered "read" operations
+READ_HTTP_METHODS = {"GET", "LIST", "WATCH", "READ"}
+
+
+# =============================================================================
 # Supported Versions
 # =============================================================================
 
@@ -174,6 +204,7 @@ class UTCPServiceConfig:
         enabled: Whether the service is enabled
         version: Version of the OpenAPI spec to use (e.g., '1.30', 'reef', '11')
         dynamic: If True, generate tools at runtime from OpenAPI URL
+        approval_policy: Policy for requiring human approval (never, always, write_operations, read_only)
     """
 
     name: str
@@ -184,6 +215,7 @@ class UTCPServiceConfig:
     enabled: bool = True
     version: str = ""
     dynamic: bool = False
+    approval_policy: str = "always"  # Default: require approval for all operations (safest)
 
 
 @dataclass
@@ -287,6 +319,21 @@ class UTCPConfig:
         dynamic_key = f"UTCP_{service_key}_DYNAMIC"
         dynamic = os.getenv(dynamic_key, "false").lower() == "true"
 
+        # Get approval policy (default: always require approval for safety)
+        approval_policy_key = f"UTCP_{service_key}_APPROVAL_POLICY"
+        approval_policy = os.getenv(approval_policy_key, "always").lower()
+
+        # Validate approval policy
+        valid_policies = {"never", "always", "write_operations", "read_only"}
+        if approval_policy not in valid_policies:
+            logger.warning(
+                "UTCP service '%s' has invalid approval_policy '%s' (valid: %s), using default 'write_operations'",
+                service_name,
+                approval_policy,
+                ", ".join(valid_policies),
+            )
+            approval_policy = "write_operations"
+
         return UTCPServiceConfig(
             name=service_name,
             openapi_url=openapi_url,
@@ -296,6 +343,7 @@ class UTCPConfig:
             enabled=enabled,
             version=version,
             dynamic=dynamic,
+            approval_policy=approval_policy,
         )
 
     @property

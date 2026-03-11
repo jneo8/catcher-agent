@@ -19,6 +19,8 @@ from temporalio import activity, workflow
 from temporalio.workflow import ActivityConfig
 
 from ein_agent_worker.utcp import registry as utcp_registry
+from ein_agent_worker.utcp.approval import create_approval_checker
+from ein_agent_worker.utcp.config import UTCPServiceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +239,9 @@ def get_utcp_activities() -> Sequence[Callable]:
 
 def create_utcp_workflow_tools(
     service_name: str,
+    service_config: UTCPServiceConfig | None = None,
     config: ActivityConfig | None = None,
+    sticky_approvals: dict[str, bool] | None = None,
 ) -> list[Callable]:
     """Create UTCP tools for use in Temporal workflows.
 
@@ -246,12 +250,22 @@ def create_utcp_workflow_tools(
 
     Args:
         service_name: UTCP service name (e.g., 'kubernetes')
+        service_config: Optional UTCP service configuration (for approval policy)
         config: Optional activity configuration
+        sticky_approvals: Optional shared sticky approvals dict for "always approve/reject"
 
     Returns:
         List of function tools for the agent
     """
     _config = config or ActivityConfig(start_to_close_timeout=timedelta(seconds=60))
+
+    # Create approval checker if service_config is provided
+    approval_checker = None
+    if service_config:
+        approval_checker = create_approval_checker(service_config, sticky_approvals=sticky_approvals)
+        logger.info(
+            f"[{service_name}] Approval policy: {service_config.approval_policy}"
+        )
 
     @function_tool(name_override=f"list_{service_name}_operations")
     async def list_operations(tag: str = "") -> str:
@@ -311,7 +325,10 @@ def create_utcp_workflow_tools(
             **_config,
         )
 
-    @function_tool(name_override=f"call_{service_name}_operation")
+    @function_tool(
+        name_override=f"call_{service_name}_operation",
+        needs_approval=approval_checker if approval_checker else False
+    )
     async def call_operation(tool_name: str, arguments: str = "{}") -> str:
         f"""Execute a {service_name} API operation.
 
