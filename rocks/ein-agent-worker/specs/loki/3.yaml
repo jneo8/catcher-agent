@@ -1,0 +1,373 @@
+openapi: 3.1.0
+info:
+  title: Grafana Loki HTTP API
+  description: |
+    Read-only endpoints for Grafana Loki log aggregation system.
+    Loki is a horizontally-scalable, highly-available, multi-tenant log aggregation system.
+    This spec covers the query and metadata endpoints used for log exploration and troubleshooting.
+  version: "3"
+  contact:
+    name: Grafana Labs
+    url: https://grafana.com/docs/loki/latest/reference/loki-http-api/
+
+servers:
+  - url: /
+
+paths:
+  /loki/api/v1/query:
+    get:
+      operationId: loki.instant-query
+      summary: Instant LogQL query
+      description: |
+        Evaluate a LogQL query at a single point in time. Returns log streams or
+        instant vector results depending on the query type.
+        Use for point-in-time metric queries like count_over_time or rate.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          description: The LogQL query to execute. Supports label matchers, line filters, parsers, and metric aggregations.
+          schema:
+            type: string
+          example: '{job="varlogs"} |= "error"'
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of entries to return. Defaults to 100.
+          schema:
+            type: integer
+            default: 100
+        - name: time
+          in: query
+          required: false
+          description: Evaluation timestamp as Unix epoch seconds (with optional decimal) or RFC3339. Defaults to now.
+          schema:
+            type: string
+        - name: direction
+          in: query
+          required: false
+          description: Sort order of log entries. 'backward' returns newest first, 'forward' returns oldest first.
+          schema:
+            type: string
+            enum: [forward, backward]
+            default: backward
+      responses:
+        "200":
+          description: Successful query response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryResponse"
+
+  /loki/api/v1/query_range:
+    get:
+      operationId: loki.range-query
+      summary: Range LogQL query
+      description: |
+        Evaluate a LogQL query over a range of time. Returns log streams or
+        matrix results depending on the query type.
+        Use for retrieving log lines within a time window or computing metrics over time.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          description: The LogQL query to execute. Supports label matchers, line filters, parsers, and metric aggregations.
+          schema:
+            type: string
+          example: 'rate({job="varlogs"}[5m])'
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of entries to return. Defaults to 100.
+          schema:
+            type: integer
+            default: 100
+        - name: start
+          in: query
+          required: false
+          description: Start of the time range as Unix epoch seconds (nanosecond precision) or RFC3339. Defaults to 1 hour ago.
+          schema:
+            type: string
+        - name: end
+          in: query
+          required: false
+          description: End of the time range as Unix epoch seconds (nanosecond precision) or RFC3339. Defaults to now.
+          schema:
+            type: string
+        - name: since
+          in: query
+          required: false
+          description: Duration string to calculate start relative to end (e.g. '5m', '1h'). Alternative to specifying start.
+          schema:
+            type: string
+        - name: step
+          in: query
+          required: false
+          description: Resolution step width for matrix responses as duration string (e.g. '5s', '1m') or float seconds.
+          schema:
+            type: string
+        - name: interval
+          in: query
+          required: false
+          description: Return entries at specified intervals for stream responses. Duration string or float seconds.
+          schema:
+            type: string
+        - name: direction
+          in: query
+          required: false
+          description: Sort order of log entries. 'backward' returns newest first, 'forward' returns oldest first.
+          schema:
+            type: string
+            enum: [forward, backward]
+            default: backward
+      responses:
+        "200":
+          description: Successful query response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryResponse"
+
+  /loki/api/v1/labels:
+    get:
+      operationId: loki.list-labels
+      summary: List all label names
+      description: |
+        Retrieve all known label names from the log index within the given time range.
+        Useful for discovering available labels before constructing LogQL queries.
+      parameters:
+        - name: start
+          in: query
+          required: false
+          description: Start of the time range as Unix epoch seconds or RFC3339. Defaults to 6 hours ago.
+          schema:
+            type: string
+        - name: end
+          in: query
+          required: false
+          description: End of the time range as Unix epoch seconds or RFC3339. Defaults to now.
+          schema:
+            type: string
+        - name: since
+          in: query
+          required: false
+          description: Duration string to calculate start relative to end (e.g. '1h', '6h').
+          schema:
+            type: string
+        - name: query
+          in: query
+          required: false
+          description: LogQL stream selector to filter which streams' labels are returned (e.g. '{job="varlogs"}').
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of label names
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LabelResponse"
+
+  /loki/api/v1/label/{name}/values:
+    get:
+      operationId: loki.label-values
+      summary: List values for a label
+      description: |
+        Retrieve all known values for a given label name within the specified time range.
+        Useful for discovering filter options for a specific label.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: The label name to retrieve values for (e.g. 'app', 'namespace', 'pod').
+          schema:
+            type: string
+        - name: start
+          in: query
+          required: false
+          description: Start of the time range as Unix epoch seconds or RFC3339. Defaults to 6 hours ago.
+          schema:
+            type: string
+        - name: end
+          in: query
+          required: false
+          description: End of the time range as Unix epoch seconds or RFC3339. Defaults to now.
+          schema:
+            type: string
+        - name: since
+          in: query
+          required: false
+          description: Duration string to calculate start relative to end (e.g. '1h', '6h').
+          schema:
+            type: string
+        - name: query
+          in: query
+          required: false
+          description: LogQL stream selector to filter which streams' label values are returned.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of label values
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LabelResponse"
+
+  /loki/api/v1/series:
+    get:
+      operationId: loki.series
+      summary: Find log streams
+      description: |
+        Return the list of log streams that match one or more label selectors.
+        Returns the set of label combinations (series) matching the given selectors within the time range.
+      parameters:
+        - name: match[]
+          in: query
+          required: true
+          description: LogQL stream selector(s) to match. Can be repeated for multiple selectors (OR logic).
+          schema:
+            type: string
+          example: '{job="varlogs"}'
+        - name: start
+          in: query
+          required: true
+          description: Start of the time range as Unix epoch seconds or RFC3339.
+          schema:
+            type: string
+        - name: end
+          in: query
+          required: true
+          description: End of the time range as Unix epoch seconds or RFC3339.
+          schema:
+            type: string
+        - name: since
+          in: query
+          required: false
+          description: Duration string to calculate start relative to end.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of matching series
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeriesResponse"
+
+  /loki/api/v1/index/stats:
+    get:
+      operationId: loki.index-stats
+      summary: Get index statistics
+      description: |
+        Retrieve statistics about the log index for a given stream selector.
+        Returns the number of streams, chunks, entries, and total bytes matching the query.
+        Useful for estimating query cost before running expensive queries.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          description: LogQL stream selector (label matchers only, no line filters or aggregations).
+          schema:
+            type: string
+          example: '{job="varlogs"}'
+        - name: start
+          in: query
+          required: true
+          description: Start of the time range as Unix epoch seconds or RFC3339.
+          schema:
+            type: string
+        - name: end
+          in: query
+          required: true
+          description: End of the time range as Unix epoch seconds or RFC3339.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Index statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsResponse"
+
+  /ready:
+    get:
+      operationId: loki.ready
+      summary: Readiness check
+      description: |
+        Returns HTTP 200 when the Loki instance is ready to accept traffic.
+        Useful for health checks and monitoring.
+      parameters: []
+      responses:
+        "200":
+          description: Loki is ready
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ready
+
+components:
+  schemas:
+    QueryResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          description: Response status ('success' or 'error')
+        data:
+          type: object
+          properties:
+            resultType:
+              type: string
+              description: Type of result - 'streams' for log queries, 'vector' for instant metric queries, 'matrix' for range metric queries
+              enum: [streams, vector, matrix]
+            result:
+              type: array
+              description: Query results (format depends on resultType)
+              items:
+                type: object
+            stats:
+              type: object
+              description: Query execution statistics
+
+    LabelResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        data:
+          type: array
+          items:
+            type: string
+          description: List of label names or values
+
+    SeriesResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+          description: List of label sets, each representing a unique log stream
+
+    StatsResponse:
+      type: object
+      properties:
+        streams:
+          type: integer
+          description: Number of matching log streams
+        chunks:
+          type: integer
+          description: Number of chunks
+        entries:
+          type: integer
+          description: Number of log entries
+        bytes:
+          type: integer
+          description: Total bytes of matching log data

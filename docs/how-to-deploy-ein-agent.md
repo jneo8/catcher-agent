@@ -189,7 +189,7 @@ Create an `environment.yaml` file with your configuration:
 env:
   # UTCP Service Configuration
   - name: UTCP_SERVICES
-    value: kubernetes,grafana,ceph,prometheus
+    value: kubernetes,grafana,ceph,prometheus,loki
 
   # Kubernetes UTCP Configuration
   # NOTE: Kubernetes ONLY supports kubeconfig auth (no bearer token support)
@@ -237,6 +237,18 @@ env:
     value: "true"
   - name: UTCP_PROMETHEUS_VERSION
     value: "3.5.0"
+
+  # Loki UTCP Configuration
+  # NOTE: Loki uses a hand-written OpenAPI spec (Loki does not ship an official one)
+  # No authentication required when accessed via COS proxy
+  - name: UTCP_LOKI_OPENAPI_URL
+    value: http://loki.cos.svc.cluster.local:3100
+  - name: UTCP_LOKI_AUTH_TYPE
+    value: none  # No authentication required
+  - name: UTCP_LOKI_ENABLED
+    value: "true"
+  - name: UTCP_LOKI_VERSION
+    value: "3"
 
   # Agent model
   - name: EIN_AGENT_MODEL
@@ -316,6 +328,7 @@ UTCP (Universal Tool Calling Protocol) generates tools dynamically from OpenAPI 
 - **grafana**: Requires `bearer` auth (service account token via Juju secret)
 - **ceph**: Requires `jwt` auth (Ceph dashboard JWT token)
 - **prometheus**: Supports `none` auth (no token needed when accessed via COS proxy) or `bearer` auth
+- **loki**: Supports `none` auth (no token needed via COS proxy) or `bearer` auth. Uses a hand-written OpenAPI spec (Loki does not ship an official one)
 
 ### OpenAPI Spec Loading: Local Files vs Live URLs
 

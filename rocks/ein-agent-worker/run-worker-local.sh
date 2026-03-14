@@ -9,7 +9,7 @@ export GEMINI_API_KEY="${GEMINI_API_KEY:-your-gemini-api-key-here}"
 # =============================================================================
 # See CLAUDE.md for instructions on setting up Kubernetes ServiceAccount and token
 
-export UTCP_SERVICES="kubernetes,grafana,prometheus"
+export UTCP_SERVICES="kubernetes,grafana,prometheus,loki"
 
 # Kubernetes UTCP Configuration (kubeconfig-based authentication)
 # NOTE: Kubernetes ONLY supports kubeconfig auth (no bearer token support)
@@ -35,6 +35,14 @@ export UTCP_PROMETHEUS_AUTH_TYPE="none"
 export UTCP_PROMETHEUS_INSECURE="true"
 export UTCP_PROMETHEUS_ENABLED="true"
 export UTCP_PROMETHEUS_VERSION="3.5.0"
+
+# Loki UTCP Configuration (no authentication required)
+# NOTE: Loki does not ship an official OpenAPI spec; a hand-written spec is used
+export UTCP_LOKI_OPENAPI_URL="${UTCP_LOKI_OPENAPI_URL:-http://your-loki-url}"
+export UTCP_LOKI_AUTH_TYPE="none"
+export UTCP_LOKI_INSECURE="true"
+export UTCP_LOKI_ENABLED="true"
+export UTCP_LOKI_VERSION="3"
 
 # =============================================================================
 # Temporal Configuration

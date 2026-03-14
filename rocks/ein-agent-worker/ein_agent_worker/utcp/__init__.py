@@ -19,6 +19,7 @@ from ein_agent_worker.utcp.config import (
     KubernetesVersion,
     CephVersion,
     GrafanaVersion,
+    LokiVersion,
     SUPPORTED_VERSIONS,
     DEFAULT_VERSIONS,
 )
@@ -57,6 +58,7 @@ __all__ = [
     "KubernetesVersion",
     "CephVersion",
     "GrafanaVersion",
+    "LokiVersion",
     "SUPPORTED_VERSIONS",
     "DEFAULT_VERSIONS",
     # Loader

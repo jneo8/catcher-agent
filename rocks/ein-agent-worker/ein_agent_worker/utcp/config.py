@@ -109,12 +109,22 @@ class PrometheusVersion(str, Enum):
         return cls.V3_5_0
 
 
+class LokiVersion(str, Enum):
+    """Supported Loki versions."""
+    V3 = "3"
+
+    @classmethod
+    def default(cls) -> "LokiVersion":
+        return cls.V3
+
+
 # Mapping of service names to their version enums
 SUPPORTED_VERSIONS = {
     "kubernetes": KubernetesVersion,
     "ceph": CephVersion,
     "grafana": GrafanaVersion,
     "prometheus": PrometheusVersion,
+    "loki": LokiVersion,
 }
 
 # Default versions for each service
@@ -123,6 +133,7 @@ DEFAULT_VERSIONS: dict[str, str] = {
     "ceph": CephVersion.default().value,
     "grafana": GrafanaVersion.default().value,
     "prometheus": PrometheusVersion.default().value,
+    "loki": LokiVersion.default().value,
 }
 
 
@@ -136,8 +147,18 @@ SERVICE_AUTH_TYPES: dict[str, tuple[str, ...]] = {
     "kubernetes": ("kubeconfig",),
     "grafana": ("bearer",),
     "prometheus": ("none", "bearer"),
+    "loki": ("none", "bearer"),
     # Default for other services
     "_default": ("proxy", "bearer", "api_key", "jwt"),
+}
+
+# Service-specific supported spec sources
+# Services without a live OpenAPI endpoint should only support 'local'
+SERVICE_SPEC_SOURCES: dict[str, tuple[str, ...]] = {
+    "loki": ("local",),        # Loki does not serve an OpenAPI spec
+    "prometheus": ("local",),  # Prometheus spec is hand-curated from GitHub
+    # Default: all sources available
+    "_default": ("local", "live"),
 }
 
 
@@ -352,13 +373,15 @@ class UTCPConfig:
         spec_source_key = f"UTCP_{service_key}_SPEC_SOURCE"
         spec_source = os.getenv(spec_source_key, "local").lower()
 
-        valid_spec_sources = {"local", "live"}
-        if spec_source not in valid_spec_sources:
+        supported_spec_sources = SERVICE_SPEC_SOURCES.get(
+            service_name, SERVICE_SPEC_SOURCES["_default"]
+        )
+        if spec_source not in supported_spec_sources:
             logger.warning(
-                "UTCP service '%s' has invalid spec_source '%s' (valid: %s), using default 'local'",
+                "UTCP service '%s' does not support spec_source '%s' (supported: %s), using default 'local'",
                 service_name,
                 spec_source,
-                ", ".join(valid_spec_sources),
+                ", ".join(supported_spec_sources),
             )
             spec_source = "local"
 
