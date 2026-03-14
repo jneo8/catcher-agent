@@ -1,6 +1,6 @@
 """Data models for investigation."""
 
-from .investigation import InvestigationConfig, SharedContext, SharedFinding
+from .investigation import SharedContext, SharedFinding
 from .hitl import (
     ApprovalDecision,
     ApprovalPolicy,
@@ -15,7 +15,6 @@ from .hitl import (
 )
 
 __all__ = [
-    "InvestigationConfig",
     "SharedContext",
     "SharedFinding",
     "ApprovalDecision",

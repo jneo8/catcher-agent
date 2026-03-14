@@ -1,12 +1,11 @@
 # Ein Agent CLI
 
-The `ein-agent-cli` is a command-line interface for the Ein Agent system, enabling users to interact with Alertmanager and trigger incident correlation workflows within Temporal.
+The `ein-agent-cli` is a command-line interface for the Ein Agent system, enabling users to start interactive human-in-the-loop investigation workflows within Temporal.
 
 ## Features
 
--   Query Alertmanager for active alerts.
--   Filter alerts by various criteria (e.g., name, fingerprint, status, blacklist/whitelist).
--   Trigger AI-powered incident correlation workflows in a Temporal cluster.
+-   Start interactive investigation sessions with an AI agent.
+-   Connect to existing investigation workflows.
 
 ## Installation
 
@@ -19,50 +18,27 @@ uv sync
 
 ## Usage
 
-The primary command is `run-incident-workflow`, which queries Alertmanager and triggers an incident correlation workflow.
-
 To run the CLI from the `ein-agent-cli` directory:
 
 ```bash
 uv run python -m ein_agent_cli [OPTIONS]
 ```
 
-### Filtering Alerts
-
-Filter alerts by name or fingerprint:
+### Start an Interactive Investigation
 
 ```bash
-# Include only specific alerts by name
-uv run python -m ein_agent_cli -i KubePodNotReady -i KubePodCrashLooping
+# Start interactive investigation with default settings
+uv run python -m ein_agent_cli investigate
 
-# Include specific alerts by fingerprint
-uv run python -m ein_agent_cli -i 07d5a192e71c
-
-# Mix alert names and fingerprints
-uv run python -m ein_agent_cli -i KubePodNotReady -i 07d5a192e71c
-
-# Custom blacklist (exclude specific alerts)
-uv run python -m ein_agent_cli -b TargetDown -b Watchdog
+# Connect to specific Temporal instance
+uv run python -m ein_agent_cli investigate --temporal-host localhost:7233
 ```
 
-### Filtering by Status
+### Connect to an Existing Session
 
 ```bash
-# Only firing alerts (default)
-uv run python -m ein_agent_cli --status firing
-
-# Only resolved alerts
-uv run python -m ein_agent_cli --status resolved
-
-# All alerts regardless of status
-uv run python -m ein_agent_cli --status all
-```
-
-### Display Options
-
-```bash
-# Show full labels in the alert table
-uv run python -m ein_agent_cli --show-labels
+# Reconnect to a running investigation workflow
+uv run python -m ein_agent_cli connect --workflow-id hitl-investigation-20231025-120000
 ```
 
 ### Configuration
@@ -71,32 +47,10 @@ Configure Temporal connection:
 
 ```bash
 # Set Temporal host, namespace, and queue
-uv run python -m ein_agent_cli \
+uv run python -m ein_agent_cli investigate \
     --temporal-host localhost:7233 \
     --temporal-namespace default \
     --temporal-queue ein-agent-queue
-```
-
-### Complete Example
-
-```bash
-# Query Alertmanager, filter alerts, review, and trigger workflow
-uv run python -m ein_agent_cli \
-    -a http://10.100.100.12/cos-alertmanager \
-    --temporal-host temporal-k8s.temporal.svc.cluster.local:7233 \
-    --temporal-namespace default \
-    --status firing \
-    -i KubePodNotReady \
-    -i KubePodCrashLooping \
-    -b Watchdog \
-    --show-labels
-
-# Automated workflow trigger (no confirmation prompt)
-uv run python -m ein_agent_cli \
-    -a http://10.100.100.12/cos-alertmanager \
-    --temporal-host temporal-k8s.temporal.svc.cluster.local:7233 \
-    -i KubePodNotReady \
-    -y
 ```
 
 ### Getting Help

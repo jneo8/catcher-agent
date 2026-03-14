@@ -370,6 +370,6 @@ TIKTOKEN_CACHE_DIR: ""
 
 ## Using Ein-Agent-CLI
 
-The `ein-agent-cli` is a command-line tool for querying Alertmanager and triggering incident correlation workflows in Temporal.
+The `ein-agent-cli` is a command-line tool for starting interactive human-in-the-loop investigation workflows in Temporal.
 
 For detailed usage and examples, please refer to the [ein-agent-cli/README.md](../ein-agent-cli/README.md) file.

@@ -12,7 +12,6 @@ from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLite
 from ein_agent_worker.models.hitl import DEFAULT_MODEL
 from ein_agent_worker.activities.alertmanager import fetch_alerts_activity
 from ein_agent_worker.activities.worker_config import load_worker_model, load_utcp_config
-from ein_agent_worker.workflows.incident_correlation_workflow import IncidentCorrelationWorkflow
 from ein_agent_worker.workflows.human_in_the_loop import HumanInTheLoopWorkflow
 from ein_agent_worker.utcp.config import UTCPConfig
 from ein_agent_worker.utcp.loader import ToolLoader
@@ -95,7 +94,6 @@ async def main():
         client,
         task_queue=queue,
         workflows=[
-            IncidentCorrelationWorkflow,
             HumanInTheLoopWorkflow,
         ],
         activities=[

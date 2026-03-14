@@ -55,9 +55,8 @@ The system uses Temporal workflows to ensure reliable, distributed processing wi
 ### ein-agent-cli
 
 A command-line interface to trigger and manage workflows. It allows users to:
-- Query Alertmanager for alerts.
-- Filter alerts based on various criteria.
-- Trigger incident correlation workflows in Temporal.
+- Start interactive human-in-the-loop investigation sessions.
+- Connect to existing investigation workflows.
 
 ### ein-agent-worker
 
