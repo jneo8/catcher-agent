@@ -309,6 +309,7 @@ UTCP (Universal Tool Calling Protocol) generates tools dynamically from OpenAPI 
 | `UTCP_{SERVICE}_VERSION` | Optional: spec version (e.g., `1.35`, `tentacle`) |
 | `UTCP_{SERVICE}_ENABLED` | Optional: enable/disable service (default: true) |
 | `UTCP_{SERVICE}_INSECURE` | Optional: skip TLS verification (default: false) |
+| `UTCP_{SERVICE}_SPEC_SOURCE` | Optional: `local` or `live` (default: `local`) |
 
 **Supported Services:**
 - **kubernetes**: Requires `kubeconfig` auth (kubeconfig passed via Juju secret)
@@ -318,12 +319,10 @@ UTCP (Universal Tool Calling Protocol) generates tools dynamically from OpenAPI 
 
 ### OpenAPI Spec Loading: Local Files vs Live URLs
 
-UTCP supports loading OpenAPI specs from either **local files** or **live URLs**. Local files take priority - if a local spec file exists, it will be used instead of fetching from the live URL.
+Each UTCP service can be configured to load its OpenAPI spec from either a **local file** or a **live URL** via the `UTCP_{SERVICE}_SPEC_SOURCE` environment variable.
 
-**Loading Priority:**
-1. Check for local spec file at `specs/{service_name}/{version}.json`
-2. If found → Load from local file (faster, works offline)
-3. If not found → Fetch from `UTCP_{SERVICE}_OPENAPI_URL`
+- `local` (default): Load spec from `specs/{service_name}/{version}.{json|yaml}`. Fails if file not found.
+- `live`: Fetch spec from `UTCP_{SERVICE}_OPENAPI_URL` at runtime.
 
 **Local Spec Directory Structure:**
 ```
@@ -352,11 +351,13 @@ rocks/ein-agent-worker/specs/
 
 3. The worker will automatically use the local file when it exists.
 
-**Forcing Live URL Loading:**
+**Using Live URL Loading:**
 
-To always fetch from the live URL, either:
-- Remove the local spec file, OR
-- Set `UTCP_{SERVICE}_VERSION` to a version that doesn't have a local file
+To fetch from the live URL at runtime, set:
+```yaml
+- name: UTCP_{SERVICE}_SPEC_SOURCE
+  value: "live"
+```
 
 **Log Output:**
 

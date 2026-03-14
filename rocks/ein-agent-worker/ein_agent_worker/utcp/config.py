@@ -9,6 +9,7 @@ Configuration Format:
     UTCP_{SERVICE}_INSECURE: Skip TLS verification (default: false)
     UTCP_{SERVICE}_ENABLED: Enable/disable the service (default: true)
     UTCP_{SERVICE}_VERSION: Version of the spec to use (default: latest supported)
+    UTCP_{SERVICE}_SPEC_SOURCE: Where to load OpenAPI spec - 'local' or 'live' (default: local)
 
 Example (Kubernetes with kubeconfig):
     export UTCP_SERVICES="kubernetes,grafana"
@@ -228,6 +229,7 @@ class UTCPServiceConfig:
     version: str = ""
     dynamic: bool = False
     approval_policy: str = "always"  # Default: require approval for all operations (safest)
+    spec_source: str = "local"  # Where to load spec: 'local' or 'live'
 
 
 @dataclass
@@ -346,6 +348,20 @@ class UTCPConfig:
             )
             approval_policy = "write_operations"
 
+        # Get spec source strategy (local or live)
+        spec_source_key = f"UTCP_{service_key}_SPEC_SOURCE"
+        spec_source = os.getenv(spec_source_key, "local").lower()
+
+        valid_spec_sources = {"local", "live"}
+        if spec_source not in valid_spec_sources:
+            logger.warning(
+                "UTCP service '%s' has invalid spec_source '%s' (valid: %s), using default 'local'",
+                service_name,
+                spec_source,
+                ", ".join(valid_spec_sources),
+            )
+            spec_source = "local"
+
         return UTCPServiceConfig(
             name=service_name,
             openapi_url=openapi_url,
@@ -356,6 +372,7 @@ class UTCPConfig:
             version=version,
             dynamic=dynamic,
             approval_policy=approval_policy,
+            spec_source=spec_source,
         )
 
     @property

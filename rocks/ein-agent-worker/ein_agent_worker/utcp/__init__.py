@@ -44,7 +44,6 @@ from ein_agent_worker.utcp.openapi_handlers import (
 )
 from ein_agent_worker.utcp.spec import (
     SpecSourceStrategy,
-    AutoStrategy,
     LocalFileStrategy,
     LiveURLStrategy,
     SpecSource,
@@ -82,7 +81,6 @@ __all__ = [
     "DEFAULT_OPENAPI_HANDLERS",
     # Spec Strategies
     "SpecSourceStrategy",
-    "AutoStrategy",
     "LocalFileStrategy",
     "LiveURLStrategy",
     "SpecSource",

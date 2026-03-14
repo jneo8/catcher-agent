@@ -24,7 +24,11 @@ from ein_agent_worker.utcp.openapi_handlers import (
     OpenApiHandler,
 )
 from ein_agent_worker.utcp.openapi_handlers.default import DefaultOpenApiHandler
-from ein_agent_worker.utcp.spec.strategy import AutoStrategy, SpecSourceStrategy
+from ein_agent_worker.utcp.spec.strategy import (
+    LocalFileStrategy,
+    LiveURLStrategy,
+    SpecSourceStrategy,
+)
 from ein_agent_worker.utcp.ssl_config import SSLConfigManager
 
 logger = logging.getLogger(__name__)
@@ -350,15 +354,20 @@ class ToolLoader:
     """Load UTCP tools for services.
 
     Orchestrates client creation using injected strategies and handlers:
-    - SpecSourceStrategy: determines where to load specs from (local/live/auto)
+    - SpecSourceStrategy: determines where to load specs from (local/live)
     - OpenApiHandler: provides service-specific auth and spec preprocessing
     - SSLConfigManager: manages SSL verification settings
     """
 
+    # Map spec_source config values to strategy classes
+    _SPEC_STRATEGIES: dict[str, type[SpecSourceStrategy]] = {
+        "local": LocalFileStrategy,
+        "live": LiveURLStrategy,
+    }
+
     def __init__(
         self,
         specs_dir: Optional[Path] = None,
-        spec_strategy: Optional[SpecSourceStrategy] = None,
         openapi_handlers: Optional[dict[str, OpenApiHandler]] = None,
         ssl_manager: Optional[SSLConfigManager] = None,
     ):
@@ -367,15 +376,12 @@ class ToolLoader:
         Args:
             specs_dir: Directory containing OpenAPI spec files.
                        Defaults to specs/ directory relative to package.
-            spec_strategy: Strategy for resolving spec sources.
-                           Defaults to AutoStrategy (local first, then live).
             openapi_handlers: Map of service name to OpenApiHandler.
                               Defaults to DEFAULT_OPENAPI_HANDLERS.
             ssl_manager: SSL configuration manager.
                          Defaults to a new SSLConfigManager instance.
         """
         self.specs_dir = specs_dir or DEFAULT_SPECS_DIR
-        self.spec_strategy = spec_strategy or AutoStrategy()
         self.openapi_handlers = openapi_handlers or DEFAULT_OPENAPI_HANDLERS
         self.ssl_manager = ssl_manager or SSLConfigManager()
         self._clients: dict[str, UtcpClient] = {}
@@ -388,6 +394,7 @@ class ToolLoader:
         token: str = "",
         insecure: bool = False,
         version: str = "",
+        spec_source: str = "local",
     ) -> UtcpClient:
         """Create a UTCP client for a service.
 
@@ -398,6 +405,7 @@ class ToolLoader:
             token: Bearer token for direct API access (required when auth_type='bearer')
             insecure: Skip TLS verification for self-signed certificates
             version: Version of the spec to use (for local spec file lookup)
+            spec_source: Where to load the spec from - 'local' or 'live'
 
         Returns:
             Configured UtcpClient instance
@@ -411,11 +419,13 @@ class ToolLoader:
         if insecure:
             self.ssl_manager.disable_ssl_verification()
 
-        # 3. Resolve spec source
-        spec_source = self.spec_strategy.resolve(
+        # 3. Resolve spec source using per-service strategy
+        strategy_cls = self._SPEC_STRATEGIES.get(spec_source, LocalFileStrategy)
+        strategy = strategy_cls()
+        resolved_source = strategy.resolve(
             service_name, openapi_url, version, self.specs_dir
         )
-        set_api_base_url(service_name, spec_source.api_base_url)
+        set_api_base_url(service_name, resolved_source.api_base_url)
 
         # 4. Get OpenAPI handler
         handler = self.openapi_handlers.get(
@@ -426,7 +436,7 @@ class ToolLoader:
         call_template: dict = {
             "name": service_name,
             "call_template_type": "http",
-            "url": spec_source.url,
+            "url": resolved_source.url,
         }
 
         # 6. Configure auth using handler
@@ -495,10 +505,10 @@ class ToolLoader:
         if load_variables_from:
             config_dict["load_variables_from"] = load_variables_from
 
-        logger.info(f"[{service_name}] Creating UTCP client (spec_type={spec_source.source_type})")
+        logger.info(f"[{service_name}] Creating UTCP client (spec_source={spec_source})")
         logger.info(f"[{service_name}] Final configuration:")
-        logger.info(f"  - Spec source: {spec_source.url}")
-        logger.info(f"  - API base URL: {spec_source.api_base_url}")
+        logger.info(f"  - Spec URL: {resolved_source.url}")
+        logger.info(f"  - API base URL: {resolved_source.api_base_url}")
         logger.info(f"  - Auth type: {auth_type}")
         logger.info(f"  - Insecure mode: {insecure}")
 

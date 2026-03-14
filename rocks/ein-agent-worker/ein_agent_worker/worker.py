@@ -47,6 +47,7 @@ async def initialize_utcp_clients() -> None:
                 token=svc.token,
                 insecure=svc.insecure,
                 version=svc.version,
+                spec_source=svc.spec_source,
             )
             # Register client along with its config (for approval policy)
             utcp_registry.register_client(svc.name, client, config=svc)
